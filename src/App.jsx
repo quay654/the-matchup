@@ -169,14 +169,28 @@ function MainApp() {
 
             {/* Matchup hero */}
             <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-4 md:gap-12 py-10">
-              <div className="text-right min-w-0">
-                <div className="text-xs uppercase tracking-[0.2em] text-black/60 mb-2 font-semibold">Away</div>
-                <div className="font-display text-2xl sm:text-4xl md:text-6xl leading-tight text-black break-words">{report.matchup.teamA}</div>
+              <div className="text-right min-w-0 flex flex-col items-end gap-3">
+                <div className="text-xs uppercase tracking-[0.2em] text-black/60 font-semibold">Away</div>
+                {report.logos?.[report.matchup.teamA] && (
+                  <img
+                    src={report.logos[report.matchup.teamA]}
+                    alt={report.matchup.teamA}
+                    className="w-16 h-16 sm:w-24 sm:h-24 md:w-32 md:h-32 object-contain"
+                  />
+                )}
+                <div className="font-display text-2xl sm:text-4xl md:text-5xl leading-tight text-black break-words">{report.matchup.teamA}</div>
               </div>
               <div className="font-italic text-2xl md:text-3xl text-black/40 flex-shrink-0">vs</div>
-              <div className="min-w-0">
-                <div className="text-xs uppercase tracking-[0.2em] text-black/60 mb-2 font-semibold">Home</div>
-                <div className="font-display text-2xl sm:text-4xl md:text-6xl leading-tight text-black break-words">{report.matchup.teamB}</div>
+              <div className="min-w-0 flex flex-col items-start gap-3">
+                <div className="text-xs uppercase tracking-[0.2em] text-black/60 font-semibold">Home</div>
+                {report.logos?.[report.matchup.teamB] && (
+                  <img
+                    src={report.logos[report.matchup.teamB]}
+                    alt={report.matchup.teamB}
+                    className="w-16 h-16 sm:w-24 sm:h-24 md:w-32 md:h-32 object-contain"
+                  />
+                )}
+                <div className="font-display text-2xl sm:text-4xl md:text-5xl leading-tight text-black break-words">{report.matchup.teamB}</div>
               </div>
             </div>
 

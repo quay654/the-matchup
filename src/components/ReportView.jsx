@@ -28,7 +28,7 @@ function ImpactBadge({ impact }) {
 
 export default function ReportView({ report }) {
   const { matchup, venue, weather, mlbStartingPitchers, mlbBullpen, aiSummary,
-    confidence, atsTrends, injuries, stars, headToHead, odds } = report;
+    confidence, atsTrends, injuries, stars, headToHead, odds, logos } = report;
 
   return (
     <section className="border-t border-black/10 pt-16 pb-24 space-y-20">
@@ -130,7 +130,12 @@ export default function ReportView({ report }) {
         <div className="grid md:grid-cols-2 gap-4">
           {Object.entries(injuries).map(([team, list]) => (
             <div key={team} className="bg-white border border-black/10 rounded-2xl p-6 shadow-sm">
-              <div className="text-xs uppercase tracking-[0.2em] text-black/60 mb-4 font-semibold">{team}</div>
+              <div className="flex items-center gap-2 mb-4">
+                {logos?.[team] && (
+                  <img src={logos[team]} alt={team} className="w-6 h-6 object-contain" />
+                )}
+                <div className="text-xs uppercase tracking-[0.2em] text-black/60 font-semibold">{team}</div>
+              </div>
               <div className="space-y-4">
                 {list.length === 0 ? (
                   <div className="text-sm text-black/50 italic">No injuries reported.</div>
@@ -158,9 +163,14 @@ export default function ReportView({ report }) {
         <div className="grid md:grid-cols-2 gap-4">
           {Object.entries(stars).map(([team, data]) => (
             <div key={team} className="bg-white border border-black/10 rounded-2xl p-6 shadow-sm">
-              <div className="mb-5 min-w-0">
-                <div className="text-xs uppercase tracking-[0.2em] text-black/60 font-semibold truncate">{team}</div>
-                <div className="font-display text-xl md:text-2xl mt-1 text-black truncate">{data.name}</div>
+              <div className="mb-5 min-w-0 flex items-center gap-4">
+                {data.logo && (
+                  <img src={data.logo} alt={team} className="w-10 h-10 object-contain flex-shrink-0" />
+                )}
+                <div className="min-w-0">
+                  <div className="text-xs uppercase tracking-[0.2em] text-black/60 font-semibold truncate">{team}</div>
+                  <div className="font-display text-xl md:text-2xl mt-1 text-black truncate">{data.name}</div>
+                </div>
               </div>
               <div className="space-y-3">
                 {data.last5.map((g, i) => (

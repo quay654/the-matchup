@@ -297,6 +297,7 @@ async function fetchRealStarData(teamA, teamB, sport) {
       const team = await espnFindTeam(teamName, espn);
       if (!team) return null;
       const teamId = team.id;
+      const logo = team.logos?.[0]?.href || null;
 
       // Get team schedule to find last 3 completed games (3 = fast, enough for context)
       const schedRes = await fetchWithTimeout(`${base}/teams/${teamId}/schedule`);
@@ -374,7 +375,7 @@ async function fetchRealStarData(teamA, teamB, sport) {
         last5.push({ opp, date, line: statLine, result });
       }
 
-      return { name: playerName, last5 };
+      return { name: playerName, last5, logo };
     } catch (err) {
       console.error(`ESPN star data error for ${teamName}:`, err);
       return null;
@@ -677,8 +678,14 @@ export default async function handler(req, res) {
   const aiSummary = aiResult?.aiSummary || `${teamA} arrives with momentum. The line movement and market signals favor the visitor side.\n\n${teamB} hold home court advantage but recent defensive numbers have been leaky.\n\nSharp action is split — this one could go either way.`;
   const confidence = aiResult?.confidence || { level: "MODERATE", stars: 3, pick: `${teamA} +3`, reasoning: "Line movement and recent form edge the visitor." };
 
+  const logos = {
+    [teamA]: stars[teamA]?.logo || null,
+    [teamB]: stars[teamB]?.logo || null,
+  };
+
   const report = {
     matchup: { teamA, teamB, sport },
+    logos,
     venue: { name: venue.name, city: venue.city, outdoor: venue.outdoor || false, retractable: venue.retractable || false },
     weather,
     mlbStartingPitchers,
