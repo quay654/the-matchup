@@ -114,16 +114,20 @@ export default async function handler(req, res) {
 
     const games = (data.response || [])
       .map(normalizeGame)
-      .sort((a, b) => a.ts - b.ts); // chronological order
+      .sort((a, b) => a.ts - b.ts);
 
     // Cache 30 min
     if (r && games.length > 0) {
       await r.setex(cacheKey, 1800, games);
     }
 
-    return res.status(200).json({ games, cached: false });
+    return res.status(200).json({
+      games,
+      cached: false,
+      debug: { url, season, from: todayStr, to: endStr, rawCount: (data.response || []).length, errors: data.errors }
+    });
   } catch (err) {
     console.error("upcoming-games error:", err);
-    return res.status(200).json({ games: [], cached: false, error: "Upstream error" });
+    return res.status(200).json({ games: [], cached: false, error: err.message });
   }
 }
