@@ -92,7 +92,10 @@ export default function GamePicker({ sport, setSport, teamA, setTeamA, teamB, se
                     <div className="font-display text-xl leading-tight text-black">
                       {g.away} <span className="text-black/40">vs</span> {g.home}
                     </div>
-                    <div className="text-sm text-black/60 mt-1">{g.time}</div>
+                    <div className="text-sm text-black/60 mt-1">
+                      {g.date && <span className="font-medium text-black/70">{g.date} · </span>}
+                      {g.time}
+                    </div>
                   </div>
                   <ChevronRight size={18} className="text-black/30 group-hover:text-emerald-500 transition-colors" />
                 </button>
