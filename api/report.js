@@ -219,127 +219,130 @@ function getCurrentSeason(sport) {
   return String(year);
 }
 
-// ── Real star player data ─────────────────────────────────────────────────
+// ── ESPN helpers ──────────────────────────────────────────────────────────
+const ESPN_SPORT_MAP = {
+  nba: { sport: "basketball", league: "nba" },
+  nfl: { sport: "americanfootball", league: "nfl" },
+  mlb: { sport: "baseball", league: "mlb" },
+  nhl: { sport: "hockey", league: "nhl" },
+};
+
+// Stat label positions per sport in ESPN box score
+const ESPN_STAT_LABELS = {
+  nba: { pts: 13, reb: 6, ast: 7 },     // MIN,FG,3PT,FT,OREB,DREB,REB,AST,STL,BLK,TO,PF,+/-,PTS
+  nfl: { passYds: 1, rushYds: 8, tds: 3 }, // approximate — varies by position
+  mlb: { h: 2, rbi: 3, hr: 4 },
+  nhl: { goals: 0, assists: 1 },
+};
+
+async function espnFindTeam(teamName, espn) {
+  const base = `https://site.api.espn.com/apis/site/v2/sports/${espn.sport}/${espn.league}`;
+  const res = await fetch(`${base}/teams?limit=100`);
+  const data = await res.json();
+  const teams = data.sports?.[0]?.leagues?.[0]?.teams || [];
+  const lc = teamName.toLowerCase();
+  return teams.find((t) => {
+    const d = (t.team?.displayName || "").toLowerCase();
+    const n = (t.team?.nickname || "").toLowerCase();
+    const s = (t.team?.shortDisplayName || "").toLowerCase();
+    const a = (t.team?.abbreviation || "").toLowerCase();
+    return d.includes(lc) || lc.includes(n) || lc.includes(s) || lc.includes(a) || n.includes(lc);
+  })?.team || null;
+}
+
+// ── Real star player data (ESPN) ──────────────────────────────────────────
 async function fetchRealStarData(teamA, teamB, sport) {
-  if (!process.env.API_SPORTS_KEY) return null;
+  const espn = ESPN_SPORT_MAP[sport];
+  if (!espn) return null;
 
-  const headers = { "x-apisports-key": process.env.API_SPORTS_KEY };
-  const sportPath = { nba: "basketball", nfl: "american-football", mlb: "baseball", nhl: "hockey" }[sport];
-  const leagueId = { nba: 12, nfl: 1, mlb: 1, nhl: 57 }[sport];
-  if (!sportPath || !leagueId) return null;
-
-  const season = getCurrentSeason(sport);
+  const base = `https://site.api.espn.com/apis/site/v2/sports/${espn.sport}/${espn.league}`;
+  const statLabels = ESPN_STAT_LABELS[sport] || {};
 
   async function getTeamStar(teamName) {
     try {
-      // Step 1: get team ID
-      const teamRes = await fetch(
-        `https://v1.${sportPath}.api-sports.io/teams?name=${encodeURIComponent(teamName)}&league=${leagueId}&season=${season}`,
-        { headers }
+      const team = await espnFindTeam(teamName, espn);
+      if (!team) return null;
+      const teamId = team.id;
+
+      // Get team schedule to find last 5 completed games
+      const schedRes = await fetch(`${base}/teams/${teamId}/schedule`);
+      const schedData = await schedRes.json();
+      const events = schedData.events || [];
+      const completed = events
+        .filter((e) => e.competitions?.[0]?.status?.type?.completed === true)
+        .slice(-5)
+        .reverse();
+
+      if (!completed.length) return null;
+
+      // Fetch box scores for all 5 games in parallel
+      const boxResults = await Promise.allSettled(
+        completed.map((e) => fetch(`${base}/summary?event=${e.id}`).then((r) => r.json()))
       );
-      if (!teamRes.ok) return null;
-      const teamData = await teamRes.json();
-      const teamId = teamData.response?.[0]?.id;
-      if (!teamId) return null;
 
-      // Step 2: get last 5 games + recent game stats in parallel
-      const [gamesRes, gameStatsRes] = await Promise.allSettled([
-        fetch(`https://v1.${sportPath}.api-sports.io/games?team=${teamId}&last=5&league=${leagueId}&season=${season}`, { headers }),
-        fetch(`https://v1.${sportPath}.api-sports.io/players/statistics?team=${teamId}&season=${season}&league=${leagueId}&page=1`, { headers }),
-      ]);
-
-      // Parse last 5 games → W/L + opponent
-      let recentGames = [];
-      if (gamesRes.status === "fulfilled" && gamesRes.value.ok) {
-        const gd = await gamesRes.value.json();
-        const games = (gd.response || []).slice(-5).reverse();
-        recentGames = games.map((g) => {
-          const homeId = g.teams?.home?.id;
-          const isHome = homeId === teamId;
-          const opp = isHome ? g.teams?.away?.name : g.teams?.home?.name || "OPP";
-          const homeScore = g.scores?.home?.points ?? g.scores?.home?.total ?? 0;
-          const awayScore = g.scores?.away?.points ?? g.scores?.away?.total ?? 0;
-          const teamScore = isHome ? homeScore : awayScore;
-          const oppScore = isHome ? awayScore : homeScore;
-          const result = teamScore > oppScore ? "W" : "L";
-          const dateStr = g.date || g.game?.date?.start || "";
-          const date = dateStr
-            ? new Date(dateStr).toLocaleDateString("en-US", { month: "short", day: "numeric" })
-            : "—";
-          const oppShort = (opp || "OPP").split(" ").pop().substring(0, 3).toUpperCase();
-          return { opp: oppShort, date, result };
-        });
-      }
-
-      // Parse player stats → find top player + build avg stat line
       let playerName = `${teamName} Star`;
-      let avgLine = "";
+      const last5 = [];
 
-      if (gameStatsRes.status === "fulfilled" && gameStatsRes.value.ok) {
-        const sd = await gameStatsRes.value.json();
-        const players = sd.response || [];
+      for (let i = 0; i < completed.length; i++) {
+        const event = completed[i];
+        const comp = event.competitions?.[0];
+        const homeComp = comp?.competitors?.find((c) => c.homeAway === "home");
+        const awayComp = comp?.competitors?.find((c) => c.homeAway === "away");
+        const isHome = homeComp?.team?.id === String(teamId);
+        const opp = isHome
+          ? (awayComp?.team?.abbreviation || awayComp?.team?.shortDisplayName || "OPP")
+          : (homeComp?.team?.abbreviation || homeComp?.team?.shortDisplayName || "OPP");
+        const teamScore = parseInt(isHome ? homeComp?.score : awayComp?.score) || 0;
+        const oppScore = parseInt(isHome ? awayComp?.score : homeComp?.score) || 0;
+        const result = teamScore > oppScore ? "W" : "L";
+        const date = event.date
+          ? new Date(event.date).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "America/New_York" })
+          : "—";
 
-        // Aggregate averages per player across multiple game entries
-        const totals = {};
-        for (const entry of players) {
-          const pid = entry.player?.id;
-          if (!pid) continue;
-          if (!totals[pid]) totals[pid] = { name: entry.player?.name || "", pts: 0, reb: 0, ast: 0, goals: 0, assists: 0, passYds: 0, rushYds: 0, tds: 0, count: 0 };
-          const t = totals[pid];
-          t.count++;
-          if (sport === "nba") {
-            t.pts += entry.points || 0;
-            t.reb += entry.totReb || entry.rebounds?.total || 0;
-            t.ast += entry.assists || 0;
-          } else if (sport === "nhl") {
-            t.goals += entry.goals || 0;
-            t.assists += entry.assists || 0;
-          } else if (sport === "nfl") {
-            t.passYds += entry.passing?.yards || 0;
-            t.rushYds += entry.rushing?.yards || 0;
-            t.tds += (entry.passing?.touchdowns || 0) + (entry.rushing?.touchdowns || 0);
+        let statLine = "—";
+
+        if (boxResults[i]?.status === "fulfilled") {
+          const bs = boxResults[i].value;
+          const teamBox = bs.boxscore?.players?.find((p) => p.team?.id === String(teamId));
+          if (teamBox) {
+            const athletes = teamBox.statistics?.[0]?.athletes || [];
+            const ptsIdx = statLabels.pts ?? 13;
+            const sorted = athletes
+              .filter((a) => a.stats?.length > ptsIdx)
+              .sort((a, b) => parseFloat(b.stats[ptsIdx] || 0) - parseFloat(a.stats[ptsIdx] || 0));
+
+            if (sorted[0]) {
+              // Use the top scorer's name as the star player name
+              playerName = sorted[0].athlete?.displayName || playerName;
+              const s = sorted[0].stats;
+
+              if (sport === "nba") {
+                const pts = s[13] || "0";
+                const reb = s[6] || "0";
+                const ast = s[7] || "0";
+                statLine = `${pts} PTS · ${reb} REB · ${ast} AST`;
+              } else if (sport === "nhl") {
+                statLine = `${s[0] || 0} G · ${s[1] || 0} A`;
+              } else if (sport === "mlb") {
+                statLine = `${s[2] || 0}-${s[0] || 0} · ${s[3] || 0} RBI`;
+              } else if (sport === "nfl") {
+                // NFL: try passing stats first, then rushing
+                const passYds = parseFloat(s[1] || 0);
+                const rushYds = parseFloat(s[8] || 0);
+                statLine = passYds > 0
+                  ? `${passYds} PASS YDS · ${s[3] || 0} TD`
+                  : `${rushYds} RUSH YDS`;
+              }
+            }
           }
         }
 
-        const sorted = Object.values(totals).sort((a, b) => {
-          const score = (p) => {
-            if (sport === "nba") return p.pts / (p.count || 1);
-            if (sport === "nhl") return (p.goals + p.assists) / (p.count || 1);
-            if (sport === "nfl") return (p.passYds + p.rushYds) / (p.count || 1);
-            return 0;
-          };
-          return score(b) - score(a);
-        });
-
-        const top = sorted[0];
-        if (top && top.count > 0) {
-          playerName = top.name || playerName;
-          const n = top.count;
-          if (sport === "nba") {
-            avgLine = `${(top.pts / n).toFixed(1)} PPG · ${(top.reb / n).toFixed(1)} RPG`;
-          } else if (sport === "nhl") {
-            avgLine = `${top.goals} G · ${top.assists} A`;
-          } else if (sport === "nfl") {
-            const pYds = Math.round(top.passYds / n);
-            const rYds = Math.round(top.rushYds / n);
-            avgLine = pYds > rYds ? `${pYds} PASS YDS/G · ${top.tds} TD` : `${rYds} RUSH YDS/G · ${top.tds} TD`;
-          }
-        }
+        last5.push({ opp, date, line: statLine, result });
       }
-
-      // Merge W/L into last5 with stat line
-      const last5 = recentGames.length
-        ? recentGames.map((g) => ({ ...g, line: avgLine || "—" }))
-        : Array.from({ length: 5 }, (_, i) => ({
-            opp: "OPP",
-            date: `Game ${i + 1}`,
-            line: avgLine || "—",
-            result: "—",
-          }));
 
       return { name: playerName, last5 };
     } catch (err) {
-      console.error(`fetchRealStarData error for ${teamName}:`, err);
+      console.error(`ESPN star data error for ${teamName}:`, err);
       return null;
     }
   }
@@ -359,51 +362,53 @@ async function fetchRealStarData(teamA, teamB, sport) {
   };
 }
 
-// ── Real H2H data ─────────────────────────────────────────────────────────
+// ── Real H2H data (ESPN) ──────────────────────────────────────────────────
 async function fetchRealH2H(teamA, teamB, sport) {
-  if (!process.env.API_SPORTS_KEY) return null;
+  const espn = ESPN_SPORT_MAP[sport];
+  if (!espn) return null;
 
-  const headers = { "x-apisports-key": process.env.API_SPORTS_KEY };
-  const sportPath = { nba: "basketball", nfl: "american-football", mlb: "baseball", nhl: "hockey" }[sport];
-  const leagueId = { nba: 12, nfl: 1, mlb: 1, nhl: 57 }[sport];
-  if (!sportPath) return null;
-
-  const season = getCurrentSeason(sport);
+  const base = `https://site.api.espn.com/apis/site/v2/sports/${espn.sport}/${espn.league}`;
 
   try {
-    // Get team IDs for both teams
-    const [teamARes, teamBRes] = await Promise.allSettled([
-      fetch(`https://v1.${sportPath}.api-sports.io/teams?name=${encodeURIComponent(teamA)}&league=${leagueId}&season=${season}`, { headers }),
-      fetch(`https://v1.${sportPath}.api-sports.io/teams?name=${encodeURIComponent(teamB)}&league=${leagueId}&season=${season}`, { headers }),
+    const [teamAData, teamBData] = await Promise.allSettled([
+      espnFindTeam(teamA, espn),
+      espnFindTeam(teamB, espn),
     ]);
 
-    const parseTeamId = async (r) => {
-      if (r.status !== "fulfilled" || !r.value.ok) return null;
-      const d = await r.value.json();
-      return d.response?.[0]?.id || null;
-    };
+    const tA = teamAData.status === "fulfilled" ? teamAData.value : null;
+    const tB = teamBData.status === "fulfilled" ? teamBData.value : null;
+    if (!tA || !tB) return null;
 
-    const [idA, idB] = await Promise.all([parseTeamId(teamARes), parseTeamId(teamBRes)]);
-    if (!idA || !idB) return null;
+    // Get teamA's schedule and find games vs teamB
+    const schedRes = await fetch(`${base}/teams/${tA.id}/schedule`);
+    const schedData = await schedRes.json();
+    const events = schedData.events || [];
 
-    const h2hRes = await fetch(
-      `https://v1.${sportPath}.api-sports.io/games/h2h?h2h=${idA}-${idB}&last=5`,
-      { headers }
-    );
-    if (!h2hRes.ok) return null;
-    const h2hData = await h2hRes.json();
-    const games = (h2hData.response || []).slice(0, 5);
-    if (!games.length) return null;
+    const h2hGames = events
+      .filter((e) => {
+        const comp = e.competitions?.[0];
+        const opponents = comp?.competitors || [];
+        return (
+          e.competitions?.[0]?.status?.type?.completed === true &&
+          opponents.some((c) => c.team?.id === String(tB.id))
+        );
+      })
+      .slice(-5)
+      .reverse();
 
-    const season_results = games.map((g) => {
-      const homeTeam = g.teams?.home?.name || "";
-      const awayTeam = g.teams?.away?.name || "";
-      const homeScore = g.scores?.home?.points ?? g.scores?.home?.total ?? 0;
-      const awayScore = g.scores?.away?.points ?? g.scores?.away?.total ?? 0;
+    if (!h2hGames.length) return null;
+
+    const season_results = h2hGames.map((e) => {
+      const comp = e.competitions?.[0];
+      const home = comp?.competitors?.find((c) => c.homeAway === "home");
+      const away = comp?.competitors?.find((c) => c.homeAway === "away");
+      const homeTeam = home?.team?.displayName || "";
+      const awayTeam = away?.team?.displayName || "";
+      const homeScore = parseInt(home?.score || 0);
+      const awayScore = parseInt(away?.score || 0);
       const winner = homeScore > awayScore ? homeTeam : awayTeam;
-      const dateStr = g.date || g.game?.date?.start || "";
-      const date = dateStr
-        ? new Date(dateStr).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+      const date = e.date
+        ? new Date(e.date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
         : "—";
       return {
         date,
@@ -412,18 +417,22 @@ async function fetchRealH2H(teamA, teamB, sport) {
       };
     });
 
-    const last = season_results[0];
     const aWins = season_results.filter((r) => r.result.toLowerCase().includes(teamA.toLowerCase())).length;
     const bWins = season_results.length - aWins;
+    const last = season_results[0];
 
     return {
       lastMeeting: last?.date || "Recent",
       score: last?.score || `${teamA} vs ${teamB}`,
       season: season_results,
-      trend: `${teamA} leads ${aWins}–${bWins} in last ${season_results.length} meetings`,
+      trend: aWins > bWins
+        ? `${teamA} leads ${aWins}–${bWins} in last ${season_results.length} meetings`
+        : aWins < bWins
+        ? `${teamB} leads ${bWins}–${aWins} in last ${season_results.length} meetings`
+        : `Series tied ${aWins}–${bWins} in last ${season_results.length} meetings`,
     };
   } catch (err) {
-    console.error("fetchRealH2H error:", err);
+    console.error("ESPN H2H error:", err);
     return null;
   }
 }
