@@ -96,8 +96,8 @@ export default async function handler(req, res) {
   }
 
   try {
-    // Fetch next 7 days one day at a time and merge
-    const days = Array.from({ length: 7 }, (_, i) => {
+    // Fetch next 3 days one day at a time and merge
+    const days = Array.from({ length: 3 }, (_, i) => {
       const d = new Date(today);
       d.setDate(d.getDate() + i);
       return d;
