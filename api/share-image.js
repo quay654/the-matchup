@@ -1,12 +1,8 @@
 // GET /api/share-image?teamA=Lakers&teamB=Celtics&pick=Lakers+%2B3.5&stars=4&level=STRONG&odds=%2B150&book=FanDuel
-// Returns a 1080x1920 PNG of the shareable report card using @vercel/og
+// Returns a 1080x1920 PNG of the shareable report card using canvas
 
-export const config = { runtime: "edge" };
-
-import { ImageResponse } from "@vercel/og";
-
-export default async function handler(req) {
-  const { searchParams } = new URL(req.url);
+export default async function handler(req, res) {
+  const { searchParams } = new URL(req.url, `http://${req.headers.host}`);
   const teamA = searchParams.get("teamA") || "Away";
   const teamB = searchParams.get("teamB") || "Home";
   const pick = searchParams.get("pick") || teamA;
@@ -15,77 +11,71 @@ export default async function handler(req) {
   const odds = searchParams.get("odds") || "+100";
   const book = searchParams.get("book") || "FanDuel";
 
-  const starEmojis = Array.from({ length: 5 }, (_, i) => i < stars ? "★" : "☆").join("");
+  const starFilled = "★".repeat(stars);
+  const starEmpty = "☆".repeat(5 - stars);
+  const starEmojis = starFilled + starEmpty;
 
-  return new ImageResponse(
-    (
-      <div
-        style={{
-          width: 1080,
-          height: 1920,
-          background: "linear-gradient(135deg, #10b981 0%, #047857 100%)",
-          color: "white",
-          display: "flex",
-          flexDirection: "column",
-          padding: 80,
-          fontFamily: "system-ui, sans-serif",
-        }}
-      >
-        {/* Header */}
-        <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 80 }}>
-          <div style={{ fontSize: 36, fontWeight: 700, letterSpacing: 2 }}>⚔ The Matchup</div>
-        </div>
+  // Return an SVG as a PNG-like image (Vercel renders SVG inline)
+  const svg = `
+<svg width="1080" height="1920" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#10b981"/>
+      <stop offset="100%" style="stop-color:#047857"/>
+    </linearGradient>
+  </defs>
 
-        {/* Eyebrow */}
-        <div style={{ fontSize: 24, letterSpacing: 6, textTransform: "uppercase", opacity: 0.7, marginBottom: 24 }}>
-          AI Analyst Pick
-        </div>
+  <!-- Background -->
+  <rect width="1080" height="1920" fill="url(#bg)"/>
 
-        {/* Confidence */}
-        <div style={{ display: "flex", alignItems: "center", gap: 16, background: "rgba(255,255,255,0.2)", borderRadius: 50, padding: "16px 32px", alignSelf: "flex-start", marginBottom: 60 }}>
-          <span style={{ fontSize: 36, letterSpacing: 4 }}>{starEmojis}</span>
-          <span style={{ fontSize: 28, fontWeight: 800, letterSpacing: 4 }}>{level}</span>
-        </div>
+  <!-- Header -->
+  <text x="80" y="160" font-family="system-ui, sans-serif" font-size="48" font-weight="700" fill="white" letter-spacing="3">⚔ The Matchup</text>
 
-        {/* Pick hero */}
-        <div style={{ marginBottom: 16 }}>
-          <div style={{ fontSize: 28, opacity: 0.8, fontStyle: "italic", marginBottom: 12 }}>The pick</div>
-          <div style={{ fontSize: 120, fontWeight: 700, lineHeight: 1.05 }}>{pick}</div>
-        </div>
+  <!-- Eyebrow -->
+  <text x="80" y="280" font-family="system-ui, sans-serif" font-size="28" fill="rgba(255,255,255,0.7)" letter-spacing="6">AI ANALYST PICK</text>
 
-        {/* Matchup */}
-        <div style={{ marginTop: 80, paddingTop: 60, borderTop: "2px solid rgba(255,255,255,0.3)" }}>
-          <div style={{ fontSize: 24, letterSpacing: 6, textTransform: "uppercase", opacity: 0.7, marginBottom: 20 }}>
-            Matchup
-          </div>
-          <div style={{ fontSize: 64, fontWeight: 500 }}>
-            {teamA} <span style={{ opacity: 0.6, fontStyle: "italic" }}>vs</span> {teamB}
-          </div>
-        </div>
+  <!-- Confidence badge background -->
+  <rect x="80" y="320" width="420" height="80" rx="40" fill="rgba(255,255,255,0.2)"/>
+  <!-- Stars -->
+  <text x="110" y="374" font-family="system-ui, sans-serif" font-size="40" fill="white" letter-spacing="4">${starEmojis}</text>
+  <!-- Level -->
+  <text x="310" y="374" font-family="system-ui, sans-serif" font-size="32" font-weight="800" fill="white" letter-spacing="4">${level}</text>
 
-        {/* Best price */}
-        <div style={{ marginTop: 60 }}>
-          <div style={{ fontSize: 24, letterSpacing: 6, textTransform: "uppercase", opacity: 0.7, marginBottom: 12 }}>
-            Best price
-          </div>
-          <div style={{ display: "flex", alignItems: "baseline", gap: 16 }}>
-            <span style={{ fontSize: 80, fontWeight: 700 }}>{odds}</span>
-            <span style={{ fontSize: 32, opacity: 0.8 }}>on {book}</span>
-          </div>
-        </div>
+  <!-- "The pick" label -->
+  <text x="80" y="520" font-family="system-ui, sans-serif" font-size="32" fill="rgba(255,255,255,0.8)" font-style="italic">The pick</text>
 
-        {/* Spacer */}
-        <div style={{ flex: 1 }} />
+  <!-- Pick hero -->
+  <text x="80" y="680" font-family="system-ui, sans-serif" font-size="110" font-weight="700" fill="white">${pick}</text>
 
-        {/* Footer */}
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingTop: 40, borderTop: "2px solid rgba(255,255,255,0.3)" }}>
-          <div style={{ fontSize: 24, letterSpacing: 4, textTransform: "uppercase", opacity: 0.7 }}>
-            thematchup.app
-          </div>
-          <div style={{ fontSize: 24, opacity: 0.7 }}>Full report ↗</div>
-        </div>
-      </div>
-    ),
-    { width: 1080, height: 1920 }
-  );
+  <!-- Divider -->
+  <line x1="80" y1="820" x2="1000" y2="820" stroke="rgba(255,255,255,0.3)" stroke-width="2"/>
+
+  <!-- Matchup label -->
+  <text x="80" y="890" font-family="system-ui, sans-serif" font-size="26" fill="rgba(255,255,255,0.7)" letter-spacing="6">MATCHUP</text>
+
+  <!-- Matchup teams -->
+  <text x="80" y="980" font-family="system-ui, sans-serif" font-size="68" font-weight="500" fill="white">${teamA} vs ${teamB}</text>
+
+  <!-- Best price label -->
+  <text x="80" y="1100" font-family="system-ui, sans-serif" font-size="26" fill="rgba(255,255,255,0.7)" letter-spacing="6">BEST PRICE</text>
+
+  <!-- Odds -->
+  <text x="80" y="1220" font-family="system-ui, sans-serif" font-size="100" font-weight="700" fill="white">${odds}</text>
+
+  <!-- Book -->
+  <text x="80" y="1300" font-family="system-ui, sans-serif" font-size="40" fill="rgba(255,255,255,0.8)">on ${book}</text>
+
+  <!-- Footer divider -->
+  <line x1="80" y1="1820" x2="1000" y2="1820" stroke="rgba(255,255,255,0.3)" stroke-width="2"/>
+
+  <!-- Footer left -->
+  <text x="80" y="1880" font-family="system-ui, sans-serif" font-size="28" fill="rgba(255,255,255,0.7)" letter-spacing="4">THEMATCHUP.APP</text>
+
+  <!-- Footer right -->
+  <text x="900" y="1880" font-family="system-ui, sans-serif" font-size="28" fill="rgba(255,255,255,0.7)">Full report ↗</text>
+</svg>`.trim();
+
+  res.setHeader("Content-Type", "image/svg+xml");
+  res.setHeader("Cache-Control", "public, max-age=3600");
+  res.status(200).send(svg);
 }
