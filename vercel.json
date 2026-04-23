@@ -1,0 +1,10 @@
+{
+  "buildCommand": "npm run build",
+  "outputDirectory": "dist",
+  "devCommand": "npm run dev",
+  "framework": "vite",
+  "rewrites": [
+    { "source": "/r/:slug", "destination": "/index.html" },
+    { "source": "/api/report/:slug", "destination": "/api/report/[slug]" }
+  ]
+}
