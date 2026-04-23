@@ -107,7 +107,7 @@ function MainApp() {
           <div className="text-xs uppercase tracking-[0.2em] text-emerald-600 mb-4 font-semibold">
             Sports Research · AI-Powered
           </div>
-          <h1 className="font-display text-5xl md:text-6xl leading-[1.05] mb-6 max-w-3xl text-black">
+          <h1 className="font-display text-4xl sm:text-5xl md:text-6xl leading-[1.05] mb-6 max-w-3xl text-black">
             Build a matchup <span className="font-italic text-emerald-600">report.</span>
           </h1>
           <p className="text-lg text-black/70 max-w-xl leading-relaxed">
@@ -167,15 +167,15 @@ function MainApp() {
             </div>
 
             {/* Matchup hero */}
-            <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-6 md:gap-12 py-10">
-              <div className="text-right">
+            <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-4 md:gap-12 py-10">
+              <div className="text-right min-w-0">
                 <div className="text-xs uppercase tracking-[0.2em] text-black/60 mb-2 font-semibold">Away</div>
-                <div className="font-display text-4xl md:text-6xl leading-none text-black">{report.matchup.teamA}</div>
+                <div className="font-display text-2xl sm:text-4xl md:text-6xl leading-tight text-black break-words">{report.matchup.teamA}</div>
               </div>
-              <div className="font-italic text-3xl text-black/40">vs</div>
-              <div>
+              <div className="font-italic text-2xl md:text-3xl text-black/40 flex-shrink-0">vs</div>
+              <div className="min-w-0">
                 <div className="text-xs uppercase tracking-[0.2em] text-black/60 mb-2 font-semibold">Home</div>
-                <div className="font-display text-4xl md:text-6xl leading-none text-black">{report.matchup.teamB}</div>
+                <div className="font-display text-2xl sm:text-4xl md:text-6xl leading-tight text-black break-words">{report.matchup.teamB}</div>
               </div>
             </div>
 

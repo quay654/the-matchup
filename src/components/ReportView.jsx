@@ -114,9 +114,9 @@ export default function ReportView({ report }) {
                 ) : (
                   list.map((inj, i) => (
                     <div key={i} className="flex items-start justify-between gap-3">
-                      <div>
-                        <div className="text-base text-black font-medium">{inj.player}</div>
-                        <div className="text-sm text-black/60 mt-0.5">{inj.note}</div>
+                      <div className="min-w-0 flex-1">
+                        <div className="text-base text-black font-medium truncate">{inj.player}</div>
+                        <div className="text-sm text-black/60 mt-0.5 break-words">{inj.note}</div>
                       </div>
                       <StatusBadge status={inj.status} />
                     </div>
@@ -134,9 +134,9 @@ export default function ReportView({ report }) {
         <div className="grid md:grid-cols-2 gap-4">
           {Object.entries(stars).map(([team, data]) => (
             <div key={team} className="bg-white border border-black/10 rounded-2xl p-6 shadow-sm">
-              <div className="mb-5">
-                <div className="text-xs uppercase tracking-[0.2em] text-black/60 font-semibold">{team}</div>
-                <div className="font-display text-2xl mt-1 text-black">{data.name}</div>
+              <div className="mb-5 min-w-0">
+                <div className="text-xs uppercase tracking-[0.2em] text-black/60 font-semibold truncate">{team}</div>
+                <div className="font-display text-xl md:text-2xl mt-1 text-black truncate">{data.name}</div>
               </div>
               <div className="space-y-3">
                 {data.last5.map((g, i) => (
@@ -297,8 +297,8 @@ export default function ReportView({ report }) {
           <div className="grid md:grid-cols-[1fr_1.5fr] gap-10">
             <div>
               <div className="text-xs uppercase tracking-[0.2em] text-black/60 mb-2 font-semibold">Last meeting</div>
-              <div className="font-display text-2xl text-black">{headToHead.lastMeeting}</div>
-              <div className="text-base text-black/70 mt-1 tabular-nums">{headToHead.score}</div>
+              <div className="font-display text-2xl text-black break-words">{headToHead.lastMeeting}</div>
+              <div className="text-base text-black/70 mt-1 break-words">{headToHead.score}</div>
               <div className="mt-6 font-display italic text-lg text-black border-l-2 border-emerald-400 pl-4">
                 {headToHead.trend}
               </div>
@@ -307,10 +307,10 @@ export default function ReportView({ report }) {
               <div className="text-xs uppercase tracking-[0.2em] text-black/60 mb-3 font-semibold">Season series</div>
               <div className="space-y-2">
                 {headToHead.season.map((m, i) => (
-                  <div key={i} className="flex items-center justify-between py-2.5 border-b border-black/[0.06] last:border-0">
-                    <div className="text-black/60 tabular-nums w-16">{m.date}</div>
-                    <div className="flex-1 text-black font-medium">{m.result}</div>
-                    <div className="text-black/70 tabular-nums">{m.score}</div>
+                  <div key={i} className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-0 py-2.5 border-b border-black/[0.06] last:border-0">
+                    <div className="text-black/60 tabular-nums text-sm sm:w-20 flex-shrink-0">{m.date}</div>
+                    <div className="flex-1 text-black font-medium text-sm min-w-0 truncate sm:px-2">{m.result}</div>
+                    <div className="text-black/70 text-sm flex-shrink-0">{m.score}</div>
                   </div>
                 ))}
               </div>
@@ -380,9 +380,9 @@ export default function ReportView({ report }) {
             <div className="text-xs uppercase tracking-[0.2em] text-black/60 mb-4 font-semibold">Moneyline</div>
             <div className="space-y-3">
               {odds.moneyline.map((row, i) => (
-                <div key={i} className="flex items-center justify-between text-sm">
-                  <span className="text-black/70">{row.book}</span>
-                  <div className="flex items-center gap-3">
+                <div key={i} className="flex items-center justify-between text-sm gap-2">
+                  <span className="text-black/70 truncate flex-shrink-0 w-20">{row.book}</span>
+                  <div className="flex items-center gap-2 flex-shrink-0">
                     <span className={`tabular-nums font-medium ${row.best === matchup.teamA ? "text-emerald-600 font-bold" : "text-black"}`}>
                       {row[matchup.teamA]}
                     </span>
@@ -401,8 +401,8 @@ export default function ReportView({ report }) {
             <div className="text-xs uppercase tracking-[0.2em] text-black/60 mb-4 font-semibold">Spread</div>
             <div className="space-y-3">
               {odds.spread.map((row, i) => (
-                <div key={i} className="flex items-center justify-between text-sm">
-                  <span className="text-black/70">{row.book}</span>
+                <div key={i} className="flex items-center justify-between text-sm gap-2">
+                  <span className="text-black/70 truncate flex-shrink-0 w-20">{row.book}</span>
                   <div className="flex items-center gap-3">
                     <span className="tabular-nums text-black font-medium">{row.line}</span>
                     <span className="text-black/30">·</span>
@@ -420,8 +420,8 @@ export default function ReportView({ report }) {
             <div className="text-xs uppercase tracking-[0.2em] text-black/60 mb-4 font-semibold">Total (O/U)</div>
             <div className="space-y-3">
               {odds.total.map((row, i) => (
-                <div key={i} className="flex items-center justify-between text-sm">
-                  <span className="text-black/70">{row.book}</span>
+                <div key={i} className="flex items-center justify-between text-sm gap-2">
+                  <span className="text-black/70 truncate flex-shrink-0 w-20">{row.book}</span>
                   <div className="flex items-center gap-3">
                     <span className="tabular-nums text-black font-medium">{row.line}</span>
                     <span className="text-black/30">·</span>

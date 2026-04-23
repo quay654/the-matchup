@@ -45,7 +45,7 @@ export default async function handler(req, res) {
   <text x="80" y="520" font-family="system-ui, sans-serif" font-size="32" fill="rgba(255,255,255,0.8)" font-style="italic">The pick</text>
 
   <!-- Pick hero -->
-  <text x="80" y="680" font-family="system-ui, sans-serif" font-size="110" font-weight="700" fill="white">${pick}</text>
+  <text x="80" y="680" font-family="system-ui, sans-serif" font-size="${pick.length > 16 ? 72 : 110}" font-weight="700" fill="white" textLength="920" lengthAdjust="spacingAndGlyphs">${pick}</text>
 
   <!-- Divider -->
   <line x1="80" y1="820" x2="1000" y2="820" stroke="rgba(255,255,255,0.3)" stroke-width="2"/>
@@ -54,7 +54,7 @@ export default async function handler(req, res) {
   <text x="80" y="890" font-family="system-ui, sans-serif" font-size="26" fill="rgba(255,255,255,0.7)" letter-spacing="6">MATCHUP</text>
 
   <!-- Matchup teams -->
-  <text x="80" y="980" font-family="system-ui, sans-serif" font-size="68" font-weight="500" fill="white">${teamA} vs ${teamB}</text>
+  <text x="80" y="980" font-family="system-ui, sans-serif" font-size="${(teamA + teamB).length > 24 ? 48 : 68}" font-weight="500" fill="white" textLength="920" lengthAdjust="spacingAndGlyphs">${teamA} vs ${teamB}</text>
 
   <!-- Best price label -->
   <text x="80" y="1100" font-family="system-ui, sans-serif" font-size="26" fill="rgba(255,255,255,0.7)" letter-spacing="6">BEST PRICE</text>

@@ -88,8 +88,8 @@ export default function GamePicker({ sport, setSport, teamA, setTeamA, teamB, se
                     i !== upcoming.length - 1 ? "border-b border-black/[0.08]" : ""
                   }`}
                 >
-                  <div>
-                    <div className="font-display text-xl leading-tight text-black">
+                  <div className="min-w-0 flex-1">
+                    <div className="font-display text-lg leading-tight text-black truncate">
                       {g.away} <span className="text-black/40">vs</span> {g.home}
                     </div>
                     <div className="text-sm text-black/60 mt-1">
