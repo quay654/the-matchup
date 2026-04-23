@@ -1,7 +1,30 @@
-import { Sparkles, MapPin, Home, Cloud, Wind, CloudRain } from "lucide-react";
+import { Sparkles, MapPin, Home, Cloud, Wind, CloudRain, TrendingUp, TrendingDown } from "lucide-react";
 import SectionHeader from "./SectionHeader";
 import StatusBadge from "./StatusBadge";
 import ConfidenceStars from "./ConfidenceStars";
+
+const IMPACT_STYLES = {
+  critical: "bg-red-100 text-red-700 border-red-200",
+  high:     "bg-orange-100 text-orange-700 border-orange-200",
+  moderate: "bg-amber-100 text-amber-700 border-amber-200",
+  monitor:  "bg-blue-100 text-blue-700 border-blue-200",
+  low:      "bg-black/5 text-black/50 border-black/10",
+};
+const IMPACT_LABELS = {
+  critical: "Critical impact",
+  high:     "High impact",
+  moderate: "Moderate impact",
+  monitor:  "Monitor",
+  low:      "Low impact",
+};
+function ImpactBadge({ impact }) {
+  const style = IMPACT_STYLES[impact] || IMPACT_STYLES.low;
+  return (
+    <span className={`inline-block mt-1.5 text-[10px] uppercase tracking-wider font-bold px-2 py-0.5 rounded border ${style}`}>
+      {IMPACT_LABELS[impact] || impact}
+    </span>
+  );
+}
 
 export default function ReportView({ report }) {
   const { matchup, venue, weather, mlbStartingPitchers, mlbBullpen, aiSummary,
@@ -117,6 +140,7 @@ export default function ReportView({ report }) {
                       <div className="min-w-0 flex-1">
                         <div className="text-base text-black font-medium truncate">{inj.player}</div>
                         <div className="text-sm text-black/60 mt-0.5 break-words">{inj.note}</div>
+                        {inj.impact && <ImpactBadge impact={inj.impact} />}
                       </div>
                       <StatusBadge status={inj.status} />
                     </div>
@@ -399,6 +423,21 @@ export default function ReportView({ report }) {
           {/* Spread */}
           <div className="bg-white border border-black/10 rounded-2xl p-5 shadow-sm">
             <div className="text-xs uppercase tracking-[0.2em] text-black/60 mb-4 font-semibold">Spread</div>
+            {odds.lineMovement?.moved && (
+              <div className={`flex items-center gap-2 mb-4 text-xs font-semibold px-3 py-2 rounded-lg border ${
+                odds.lineMovement.direction === "favored"
+                  ? "bg-emerald-50 border-emerald-200 text-emerald-700"
+                  : "bg-amber-50 border-amber-200 text-amber-700"
+              }`}>
+                {odds.lineMovement.direction === "favored"
+                  ? <TrendingDown size={12} />
+                  : <TrendingUp size={12} />}
+                <span>
+                  Line moved: {odds.lineMovement.open} → {odds.lineMovement.current}
+                  {" "}({odds.lineMovement.direction === "favored" ? "sharp on favorite" : "sharp on underdog"})
+                </span>
+              </div>
+            )}
             <div className="space-y-3">
               {odds.spread.map((row, i) => (
                 <div key={i} className="flex items-center justify-between text-sm gap-2">

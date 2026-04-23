@@ -155,11 +155,39 @@ async function fetchOdds(teamA, teamB, sport) {
       best.best = true;
     }
 
+    // Line movement tracking via Redis
+    let lineMovement = null;
+    if (spread.length) {
+      const currentLine = spread[0].line;
+      const r = getRedis();
+      if (r) {
+        try {
+          const openKey = `open:spread:${sport}:${teamA.toLowerCase()}:${teamB.toLowerCase()}`;
+          const openLine = await r.get(openKey);
+          if (!openLine) {
+            await r.setex(openKey, 86400, currentLine);
+          } else if (openLine !== currentLine) {
+            const openNum = parseFloat(openLine);
+            const currNum = parseFloat(currentLine);
+            const diff = currNum - openNum;
+            lineMovement = {
+              open: openLine,
+              current: currentLine,
+              moved: true,
+              direction: diff < 0 ? "favored" : "faded",
+              diff: Math.abs(diff).toFixed(1),
+            };
+          }
+        } catch { /* ignore Redis errors */ }
+      }
+    }
+
     return {
       updated: "Updated just now",
       moneyline,
       spread,
       total,
+      lineMovement,
       bestValue: { team: teamA, odds: moneyline.find((r) => r.best)?.[ teamA] || "+100", book: bestABook || "FanDuel" },
     };
   } catch {
@@ -509,6 +537,19 @@ confidence is 1-5 (5 = strongest). level must be STRONG (5), MODERATE (3-4), or 
   }
 }
 
+// ── Injury impact rating ───────────────────────────────────────────────────
+function getInjuryImpact(status, isStarPlayer) {
+  if (isStarPlayer) {
+    if (status === "Out" || status === "Doubtful") return "critical";
+    if (status === "Questionable") return "high";
+    return "moderate";
+  }
+  if (status === "Out") return "high";
+  if (status === "Doubtful") return "moderate";
+  if (status === "Questionable") return "monitor";
+  return "low";
+}
+
 // ── Mock fallbacks ─────────────────────────────────────────────────────────
 function mockOdds(teamA, teamB) {
   return {
@@ -608,6 +649,19 @@ export default async function handler(req, res) {
     (realStarsResult.status === "fulfilled" && realStarsResult.value) ||
     mockStarData(teamA, teamB, sport);
 
+  // Add impact rating to each injury entry
+  const starNames = Object.values(stars).map((s) => (s.name || "").toLowerCase());
+  const injuriesWithImpact = {};
+  for (const [team, list] of Object.entries(injuries)) {
+    injuriesWithImpact[team] = list.map((inj) => ({
+      ...inj,
+      impact: getInjuryImpact(
+        inj.status,
+        starNames.some((n) => n && inj.player && n.includes(inj.player.toLowerCase()))
+      ),
+    }));
+  }
+
   const headToHead =
     (realH2HResult.status === "fulfilled" && realH2HResult.value) || {
       lastMeeting: "Recent season",
@@ -617,7 +671,7 @@ export default async function handler(req, res) {
     };
 
   // Build context for Claude
-  const dataContext = { injuries, odds, weather, stars, headToHead, sport, venue: { name: venue.name, city: venue.city } };
+  const dataContext = { injuries: injuriesWithImpact, odds, weather, stars, headToHead, sport, venue: { name: venue.name, city: venue.city } };
   const aiResult = await generateAISummary(teamA, teamB, sport, dataContext);
 
   const aiSummary = aiResult?.aiSummary || `${teamA} arrives with momentum. The line movement and market signals favor the visitor side.\n\n${teamB} hold home court advantage but recent defensive numbers have been leaky.\n\nSharp action is split — this one could go either way.`;
@@ -645,7 +699,7 @@ export default async function handler(req, res) {
         { label: "Overs in last 10", value: "4-6", pct: 40, hot: false },
       ],
     },
-    injuries,
+    injuries: injuriesWithImpact,
     stars,
     headToHead,
     odds,
