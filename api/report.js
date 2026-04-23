@@ -42,14 +42,19 @@ async function checkRateLimit(req) {
   const r = getRedis();
   if (!r) return { allowed: true };
 
-  const ip = req.headers["x-forwarded-for"]?.split(",")[0] || req.socket?.remoteAddress || "unknown";
-  const userId = req.headers["x-user-id"] || null;
-  const key = userId ? `rl:user:${userId}` : `rl:ip:${ip}`;
-  const limit = userId ? 50 : 10;
+  try {
+    const ip = req.headers["x-forwarded-for"]?.split(",")[0] || req.socket?.remoteAddress || "unknown";
+    const userId = req.headers["x-user-id"] || null;
+    const key = userId ? `rl:user:${userId}` : `rl:ip:${ip}`;
+    const limit = userId ? 50 : 10;
 
-  const count = await r.incr(key);
-  if (count === 1) await r.expire(key, 86400);
-  return { allowed: count <= limit, count, limit };
+    const count = await r.incr(key);
+    if (count === 1) await r.expire(key, 86400);
+    return { allowed: count <= limit, count, limit };
+  } catch {
+    // Redis auth failure or connection issue — allow the request
+    return { allowed: true };
+  }
 }
 
 // ── API-Sports fetchers ───────────────────────────────────────────────────
