@@ -36,6 +36,7 @@ function MainApp() {
     setLoading(true);
     setError(null);
     setReport(null);
+    setTimeout(() => reportRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
 
     try {
       const res = await fetch("/api/report", {
@@ -53,12 +54,10 @@ function MainApp() {
 
       const data = await res.json();
       setReport(data);
-      setTimeout(() => reportRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 100);
     } catch {
       // Fallback to mock data when API isn't wired up yet
       const mock = buildMockReport(a, b, s);
       setReport(mock);
-      setTimeout(() => reportRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 100);
     } finally {
       setLoading(false);
     }
@@ -134,7 +133,7 @@ function MainApp() {
         )}
 
         {loading && (
-          <div className="border-t border-black/10 pt-16 pb-24 text-center">
+          <div ref={reportRef} className="border-t border-black/10 pt-16 pb-24 text-center">
             <div className="inline-flex items-center gap-3 text-black/60">
               <div className="w-5 h-5 border-2 border-emerald-400 border-t-transparent rounded-full animate-spin" />
               Generating report…
@@ -145,7 +144,7 @@ function MainApp() {
         {report && !loading && (
           <>
             {/* Report header with share buttons */}
-            <div ref={reportRef} className="flex items-center justify-between mb-8 flex-wrap gap-3 border-t border-black/10 pt-16">
+            <div className="flex items-center justify-between mb-8 flex-wrap gap-3 border-t border-black/10 pt-16">
               <div className="text-xs uppercase tracking-[0.2em] text-emerald-600 font-semibold">
                 {report.matchup.teamA} vs {report.matchup.teamB} · {report.matchup.sport.toUpperCase()}
               </div>
