@@ -6,20 +6,37 @@
 import { Redis } from "@upstash/redis";
 
 const SPORT_LEAGUE_MAP = {
-  nba: { sport: "basketball", league: 12 },   // NBA
-  nfl: { sport: "american-football", league: 1 },  // NFL
-  mlb: { sport: "baseball", league: 1 },       // MLB
-  nhl: { sport: "hockey", league: 57 },        // NHL
+  nba: { sport: "basketball", league: 12 },
+  nfl: { sport: "american-football", league: 1 },
+  mlb: { sport: "baseball", league: 1 },
+  nhl: { sport: "hockey", league: 57 },
 };
 
-// Normalize API-Sports game data into our shape
-function normalizeGame(game, sport) {
-  const home = game.teams?.home?.name || game.home_team || "";
-  const away = game.teams?.away?.name || game.away_team || "";
+function getCurrentSeason(sport) {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = now.getMonth() + 1; // 1-12
+  if (sport === "nba" || sport === "nhl") {
+    // Season spans two calendar years: Sep–Jun
+    if (month >= 9) return `${year}-${String(year + 1).slice(-2)}`;
+    return `${year - 1}-${String(year).slice(-2)}`;
+  }
+  // MLB and NFL use single calendar year
+  return String(year);
+}
+
+function normalizeGame(game) {
+  const home = game.teams?.home?.name || "";
+  const away = game.teams?.away?.name || "";
   const dateStr = game.date || game.game?.date?.start || "";
   const date = dateStr ? new Date(dateStr) : null;
   const time = date
-    ? date.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: "America/New_York", timeZoneName: "short" })
+    ? date.toLocaleTimeString("en-US", {
+        hour: "numeric",
+        minute: "2-digit",
+        timeZone: "America/New_York",
+        timeZoneName: "short",
+      })
     : "TBD";
 
   return {
@@ -57,28 +74,25 @@ export default async function handler(req, res) {
   if (r) {
     try {
       const cached = await r.get(cacheKey);
-      if (cached) {
-        return res.status(200).json({ games: cached, cached: true });
-      }
+      if (cached) return res.status(200).json({ games: cached, cached: true });
     } catch {
       // cache miss — continue
     }
   }
 
-  // No API key — return empty (client falls back to mock)
   if (!process.env.API_SPORTS_KEY) {
     return res.status(200).json({ games: [], cached: false, note: "No API key configured" });
   }
 
   try {
-    const url = `https://v1.${league.sport}.api-sports.io/games?league=${league.league}&date=${today}`;
+    const season = getCurrentSeason(sport);
+    const url = `https://v1.${league.sport}.api-sports.io/games?league=${league.league}&season=${season}&date=${today}`;
     const apiRes = await fetch(url, {
       headers: { "x-apisports-key": process.env.API_SPORTS_KEY },
     });
     const data = await apiRes.json();
-    const games = (data.response || []).map((g) => normalizeGame(g, sport));
+    const games = (data.response || []).map(normalizeGame);
 
-    // Cache 10 min
     if (r && games.length > 0) {
       await r.setex(cacheKey, 600, games);
     }

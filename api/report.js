@@ -202,11 +202,231 @@ function deriveWeatherImpact(temp, wind, condition) {
   return "Mild conditions — minimal weather impact expected.";
 }
 
+// ── Season helper ─────────────────────────────────────────────────────────
+function getCurrentSeason(sport) {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = now.getMonth() + 1;
+  if (sport === "nba" || sport === "nhl") {
+    if (month >= 9) return `${year}-${String(year + 1).slice(-2)}`;
+    return `${year - 1}-${String(year).slice(-2)}`;
+  }
+  return String(year);
+}
+
+// ── Real star player data ─────────────────────────────────────────────────
+async function fetchRealStarData(teamA, teamB, sport) {
+  if (!process.env.API_SPORTS_KEY) return null;
+
+  const headers = { "x-apisports-key": process.env.API_SPORTS_KEY };
+  const sportPath = { nba: "basketball", nfl: "american-football", mlb: "baseball", nhl: "hockey" }[sport];
+  const leagueId = { nba: 12, nfl: 1, mlb: 1, nhl: 57 }[sport];
+  if (!sportPath || !leagueId) return null;
+
+  const season = getCurrentSeason(sport);
+
+  async function getTeamStar(teamName) {
+    try {
+      // Step 1: get team ID
+      const teamRes = await fetch(
+        `https://v1.${sportPath}.api-sports.io/teams?name=${encodeURIComponent(teamName)}&league=${leagueId}&season=${season}`,
+        { headers }
+      );
+      if (!teamRes.ok) return null;
+      const teamData = await teamRes.json();
+      const teamId = teamData.response?.[0]?.id;
+      if (!teamId) return null;
+
+      // Step 2: get last 5 games + recent game stats in parallel
+      const [gamesRes, gameStatsRes] = await Promise.allSettled([
+        fetch(`https://v1.${sportPath}.api-sports.io/games?team=${teamId}&last=5&league=${leagueId}&season=${season}`, { headers }),
+        fetch(`https://v1.${sportPath}.api-sports.io/players/statistics?team=${teamId}&season=${season}&league=${leagueId}&page=1`, { headers }),
+      ]);
+
+      // Parse last 5 games → W/L + opponent
+      let recentGames = [];
+      if (gamesRes.status === "fulfilled" && gamesRes.value.ok) {
+        const gd = await gamesRes.value.json();
+        const games = (gd.response || []).slice(-5).reverse();
+        recentGames = games.map((g) => {
+          const homeId = g.teams?.home?.id;
+          const isHome = homeId === teamId;
+          const opp = isHome ? g.teams?.away?.name : g.teams?.home?.name || "OPP";
+          const homeScore = g.scores?.home?.points ?? g.scores?.home?.total ?? 0;
+          const awayScore = g.scores?.away?.points ?? g.scores?.away?.total ?? 0;
+          const teamScore = isHome ? homeScore : awayScore;
+          const oppScore = isHome ? awayScore : homeScore;
+          const result = teamScore > oppScore ? "W" : "L";
+          const dateStr = g.date || g.game?.date?.start || "";
+          const date = dateStr
+            ? new Date(dateStr).toLocaleDateString("en-US", { month: "short", day: "numeric" })
+            : "—";
+          const oppShort = (opp || "OPP").split(" ").pop().substring(0, 3).toUpperCase();
+          return { opp: oppShort, date, result };
+        });
+      }
+
+      // Parse player stats → find top player + build avg stat line
+      let playerName = `${teamName} Star`;
+      let avgLine = "";
+
+      if (gameStatsRes.status === "fulfilled" && gameStatsRes.value.ok) {
+        const sd = await gameStatsRes.value.json();
+        const players = sd.response || [];
+
+        // Aggregate averages per player across multiple game entries
+        const totals = {};
+        for (const entry of players) {
+          const pid = entry.player?.id;
+          if (!pid) continue;
+          if (!totals[pid]) totals[pid] = { name: entry.player?.name || "", pts: 0, reb: 0, ast: 0, goals: 0, assists: 0, passYds: 0, rushYds: 0, tds: 0, count: 0 };
+          const t = totals[pid];
+          t.count++;
+          if (sport === "nba") {
+            t.pts += entry.points || 0;
+            t.reb += entry.totReb || entry.rebounds?.total || 0;
+            t.ast += entry.assists || 0;
+          } else if (sport === "nhl") {
+            t.goals += entry.goals || 0;
+            t.assists += entry.assists || 0;
+          } else if (sport === "nfl") {
+            t.passYds += entry.passing?.yards || 0;
+            t.rushYds += entry.rushing?.yards || 0;
+            t.tds += (entry.passing?.touchdowns || 0) + (entry.rushing?.touchdowns || 0);
+          }
+        }
+
+        const sorted = Object.values(totals).sort((a, b) => {
+          const score = (p) => {
+            if (sport === "nba") return p.pts / (p.count || 1);
+            if (sport === "nhl") return (p.goals + p.assists) / (p.count || 1);
+            if (sport === "nfl") return (p.passYds + p.rushYds) / (p.count || 1);
+            return 0;
+          };
+          return score(b) - score(a);
+        });
+
+        const top = sorted[0];
+        if (top && top.count > 0) {
+          playerName = top.name || playerName;
+          const n = top.count;
+          if (sport === "nba") {
+            avgLine = `${(top.pts / n).toFixed(1)} PPG · ${(top.reb / n).toFixed(1)} RPG`;
+          } else if (sport === "nhl") {
+            avgLine = `${top.goals} G · ${top.assists} A`;
+          } else if (sport === "nfl") {
+            const pYds = Math.round(top.passYds / n);
+            const rYds = Math.round(top.rushYds / n);
+            avgLine = pYds > rYds ? `${pYds} PASS YDS/G · ${top.tds} TD` : `${rYds} RUSH YDS/G · ${top.tds} TD`;
+          }
+        }
+      }
+
+      // Merge W/L into last5 with stat line
+      const last5 = recentGames.length
+        ? recentGames.map((g) => ({ ...g, line: avgLine || "—" }))
+        : Array.from({ length: 5 }, (_, i) => ({
+            opp: "OPP",
+            date: `Game ${i + 1}`,
+            line: avgLine || "—",
+            result: "—",
+          }));
+
+      return { name: playerName, last5 };
+    } catch (err) {
+      console.error(`fetchRealStarData error for ${teamName}:`, err);
+      return null;
+    }
+  }
+
+  const [starAResult, starBResult] = await Promise.allSettled([
+    getTeamStar(teamA),
+    getTeamStar(teamB),
+  ]);
+
+  const starA = starAResult.status === "fulfilled" ? starAResult.value : null;
+  const starB = starBResult.status === "fulfilled" ? starBResult.value : null;
+
+  if (!starA && !starB) return null;
+  return {
+    [teamA]: starA || { name: `${teamA} Star`, last5: [] },
+    [teamB]: starB || { name: `${teamB} Star`, last5: [] },
+  };
+}
+
+// ── Real H2H data ─────────────────────────────────────────────────────────
+async function fetchRealH2H(teamA, teamB, sport) {
+  if (!process.env.API_SPORTS_KEY) return null;
+
+  const headers = { "x-apisports-key": process.env.API_SPORTS_KEY };
+  const sportPath = { nba: "basketball", nfl: "american-football", mlb: "baseball", nhl: "hockey" }[sport];
+  const leagueId = { nba: 12, nfl: 1, mlb: 1, nhl: 57 }[sport];
+  if (!sportPath) return null;
+
+  const season = getCurrentSeason(sport);
+
+  try {
+    // Get team IDs for both teams
+    const [teamARes, teamBRes] = await Promise.allSettled([
+      fetch(`https://v1.${sportPath}.api-sports.io/teams?name=${encodeURIComponent(teamA)}&league=${leagueId}&season=${season}`, { headers }),
+      fetch(`https://v1.${sportPath}.api-sports.io/teams?name=${encodeURIComponent(teamB)}&league=${leagueId}&season=${season}`, { headers }),
+    ]);
+
+    const parseTeamId = async (r) => {
+      if (r.status !== "fulfilled" || !r.value.ok) return null;
+      const d = await r.value.json();
+      return d.response?.[0]?.id || null;
+    };
+
+    const [idA, idB] = await Promise.all([parseTeamId(teamARes), parseTeamId(teamBRes)]);
+    if (!idA || !idB) return null;
+
+    const h2hRes = await fetch(
+      `https://v1.${sportPath}.api-sports.io/games/h2h?h2h=${idA}-${idB}&last=5`,
+      { headers }
+    );
+    if (!h2hRes.ok) return null;
+    const h2hData = await h2hRes.json();
+    const games = (h2hData.response || []).slice(0, 5);
+    if (!games.length) return null;
+
+    const season_results = games.map((g) => {
+      const homeTeam = g.teams?.home?.name || "";
+      const awayTeam = g.teams?.away?.name || "";
+      const homeScore = g.scores?.home?.points ?? g.scores?.home?.total ?? 0;
+      const awayScore = g.scores?.away?.points ?? g.scores?.away?.total ?? 0;
+      const winner = homeScore > awayScore ? homeTeam : awayTeam;
+      const dateStr = g.date || g.game?.date?.start || "";
+      const date = dateStr
+        ? new Date(dateStr).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+        : "—";
+      return {
+        date,
+        result: `${winner} won`,
+        score: `${awayTeam} ${awayScore} – ${homeScore} ${homeTeam}`,
+      };
+    });
+
+    const last = season_results[0];
+    const aWins = season_results.filter((r) => r.result.toLowerCase().includes(teamA.toLowerCase())).length;
+    const bWins = season_results.length - aWins;
+
+    return {
+      lastMeeting: last?.date || "Recent",
+      score: last?.score || `${teamA} vs ${teamB}`,
+      season: season_results,
+      trend: `${teamA} leads ${aWins}–${bWins} in last ${season_results.length} meetings`,
+    };
+  } catch (err) {
+    console.error("fetchRealH2H error:", err);
+    return null;
+  }
+}
+
 // ── MLB-specific fetchers ─────────────────────────────────────────────────
 async function fetchMLBPitchers(teamA, teamB) {
   if (!process.env.API_SPORTS_KEY) return null;
   // Return null — API-Sports MLB pitcher data requires specific game ID
-  // In production, look up today's game ID first, then fetch /games/odds or /players/statistics
   return null;
 }
 
@@ -354,10 +574,26 @@ export default async function handler(req, res) {
   const weather = weatherResult.status === "fulfilled" ? weatherResult.value : null;
   const mlbStartingPitchers = (mlbPitchersResult.status === "fulfilled") ? mlbPitchersResult.value : null;
 
-  const stars = mockStarData(teamA, teamB, sport);
+  // Fetch real star player data + H2H in parallel
+  const [realStarsResult, realH2HResult] = await Promise.allSettled([
+    fetchRealStarData(teamA, teamB, sport),
+    fetchRealH2H(teamA, teamB, sport),
+  ]);
+
+  const stars =
+    (realStarsResult.status === "fulfilled" && realStarsResult.value) ||
+    mockStarData(teamA, teamB, sport);
+
+  const headToHead =
+    (realH2HResult.status === "fulfilled" && realH2HResult.value) || {
+      lastMeeting: "Recent season",
+      score: `${teamA} vs ${teamB}`,
+      season: [{ date: "Recent", result: `${teamA} won`, score: "See full H2H" }],
+      trend: `${teamA} vs ${teamB} — season series`,
+    };
 
   // Build context for Claude
-  const dataContext = { injuries, odds, weather, stars, sport, venue: { name: venue.name, city: venue.city } };
+  const dataContext = { injuries, odds, weather, stars, headToHead, sport, venue: { name: venue.name, city: venue.city } };
   const aiResult = await generateAISummary(teamA, teamB, sport, dataContext);
 
   const aiSummary = aiResult?.aiSummary || `${teamA} arrives with momentum. The line movement and market signals favor the visitor side.\n\n${teamB} hold home court advantage but recent defensive numbers have been leaky.\n\nSharp action is split — this one could go either way.`;
@@ -368,7 +604,7 @@ export default async function handler(req, res) {
     venue: { name: venue.name, city: venue.city, outdoor: venue.outdoor || false, retractable: venue.retractable || false },
     weather,
     mlbStartingPitchers,
-    mlbBullpen: null, // TODO: wire up when MLB bullpen endpoint is mapped
+    mlbBullpen: null,
     aiSummary,
     confidence,
     atsTrends: {
@@ -387,14 +623,7 @@ export default async function handler(req, res) {
     },
     injuries,
     stars,
-    headToHead: {
-      lastMeeting: "Recent season",
-      score: `${teamA} — ${teamB}`,
-      season: [
-        { date: "Recent", result: `${teamA} won`, score: "See full H2H" },
-      ],
-      trend: `${teamA} vs ${teamB} — season series`,
-    },
+    headToHead,
     odds,
   };
 
