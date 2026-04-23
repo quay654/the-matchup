@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { Image as ImageIcon, Share2, Check } from "lucide-react";
 import Header from "./components/Header";
@@ -14,6 +14,7 @@ function MainApp() {
   const [teamA, setTeamA] = useState("");
   const [teamB, setTeamB] = useState("");
   const [report, setReport] = useState(null);
+  const reportRef = useRef(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [showShareModal, setShowShareModal] = useState(false);
@@ -52,10 +53,12 @@ function MainApp() {
 
       const data = await res.json();
       setReport(data);
+      setTimeout(() => reportRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 100);
     } catch {
       // Fallback to mock data when API isn't wired up yet
       const mock = buildMockReport(a, b, s);
       setReport(mock);
+      setTimeout(() => reportRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 100);
     } finally {
       setLoading(false);
     }
@@ -142,7 +145,7 @@ function MainApp() {
         {report && !loading && (
           <>
             {/* Report header with share buttons */}
-            <div className="flex items-center justify-between mb-8 flex-wrap gap-3 border-t border-black/10 pt-16">
+            <div ref={reportRef} className="flex items-center justify-between mb-8 flex-wrap gap-3 border-t border-black/10 pt-16">
               <div className="text-xs uppercase tracking-[0.2em] text-emerald-600 font-semibold">
                 {report.matchup.teamA} vs {report.matchup.teamB} · {report.matchup.sport.toUpperCase()}
               </div>
