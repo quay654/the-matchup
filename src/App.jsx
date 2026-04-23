@@ -1,13 +1,14 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, lazy, Suspense } from "react";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { Image as ImageIcon, Share2, Check } from "lucide-react";
 import Header from "./components/Header";
 import GamePicker from "./components/GamePicker";
 import ReportView from "./components/ReportView";
 import ShareModal from "./components/ShareModal";
-import SharedReport from "./pages/SharedReport";
 import { supabase } from "./lib/supabase";
 import { buildMockReport } from "./lib/mockData";
+
+const SharedReport = lazy(() => import("./pages/SharedReport"));
 
 function MainApp() {
   const [sport, setSport] = useState("nba");
@@ -196,7 +197,7 @@ export default function App() {
     <BrowserRouter>
       <Routes>
         <Route path="/" element={<MainApp />} />
-        <Route path="/r/:slug" element={<SharedReport />} />
+        <Route path="/r/:slug" element={<Suspense fallback={<div className="min-h-screen flex items-center justify-center text-black/40">Loading…</div>}><SharedReport /></Suspense>} />
       </Routes>
     </BrowserRouter>
   );

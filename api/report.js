@@ -235,9 +235,15 @@ const ESPN_STAT_LABELS = {
   nhl: { goals: 0, assists: 1 },
 };
 
+function fetchWithTimeout(url, ms = 5000) {
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), ms);
+  return fetch(url, { signal: controller.signal }).finally(() => clearTimeout(id));
+}
+
 async function espnFindTeam(teamName, espn) {
   const base = `https://site.api.espn.com/apis/site/v2/sports/${espn.sport}/${espn.league}`;
-  const res = await fetch(`${base}/teams?limit=100`);
+  const res = await fetchWithTimeout(`${base}/teams?limit=100`);
   const data = await res.json();
   const teams = data.sports?.[0]?.leagues?.[0]?.teams || [];
   const lc = teamName.toLowerCase();
@@ -264,20 +270,20 @@ async function fetchRealStarData(teamA, teamB, sport) {
       if (!team) return null;
       const teamId = team.id;
 
-      // Get team schedule to find last 5 completed games
-      const schedRes = await fetch(`${base}/teams/${teamId}/schedule`);
+      // Get team schedule to find last 3 completed games (3 = fast, enough for context)
+      const schedRes = await fetchWithTimeout(`${base}/teams/${teamId}/schedule`);
       const schedData = await schedRes.json();
       const events = schedData.events || [];
       const completed = events
         .filter((e) => e.competitions?.[0]?.status?.type?.completed === true)
-        .slice(-5)
+        .slice(-3)
         .reverse();
 
       if (!completed.length) return null;
 
-      // Fetch box scores for all 5 games in parallel
+      // Fetch box scores for all 3 games in parallel with timeout
       const boxResults = await Promise.allSettled(
-        completed.map((e) => fetch(`${base}/summary?event=${e.id}`).then((r) => r.json()))
+        completed.map((e) => fetchWithTimeout(`${base}/summary?event=${e.id}`).then((r) => r.json()))
       );
 
       let playerName = `${teamName} Star`;
@@ -380,7 +386,7 @@ async function fetchRealH2H(teamA, teamB, sport) {
     if (!tA || !tB) return null;
 
     // Get teamA's schedule and find games vs teamB
-    const schedRes = await fetch(`${base}/teams/${tA.id}/schedule`);
+    const schedRes = await fetchWithTimeout(`${base}/teams/${tA.id}/schedule`);
     const schedData = await schedRes.json();
     const events = schedData.events || [];
 
@@ -576,24 +582,27 @@ export default async function handler(req, res) {
 
   const venue = VENUES[teamB] || { name: `${teamB} Arena`, city: "TBD", outdoor: false };
 
-  // Fire all data fetches in parallel — fail gracefully
-  const [injuriesResult, oddsResult, weatherResult, mlbPitchersResult] = await Promise.allSettled([
+  // Fire ALL fetches in parallel — injuries, odds, weather, stars, H2H all at once
+  const [
+    injuriesResult,
+    oddsResult,
+    weatherResult,
+    mlbPitchersResult,
+    realStarsResult,
+    realH2HResult,
+  ] = await Promise.allSettled([
     fetchInjuries(teamA, teamB, sport),
     fetchOdds(teamA, teamB, sport),
     fetchWeather(venue),
     sport === "mlb" ? fetchMLBPitchers(teamA, teamB) : Promise.resolve(null),
+    fetchRealStarData(teamA, teamB, sport),
+    fetchRealH2H(teamA, teamB, sport),
   ]);
 
   const injuries = injuriesResult.status === "fulfilled" ? injuriesResult.value : { [teamA]: [], [teamB]: [] };
   const odds = (oddsResult.status === "fulfilled" && oddsResult.value) ? oddsResult.value : mockOdds(teamA, teamB);
   const weather = weatherResult.status === "fulfilled" ? weatherResult.value : null;
   const mlbStartingPitchers = (mlbPitchersResult.status === "fulfilled") ? mlbPitchersResult.value : null;
-
-  // Fetch real star player data + H2H in parallel
-  const [realStarsResult, realH2HResult] = await Promise.allSettled([
-    fetchRealStarData(teamA, teamB, sport),
-    fetchRealH2H(teamA, teamB, sport),
-  ]);
 
   const stars =
     (realStarsResult.status === "fulfilled" && realStarsResult.value) ||
