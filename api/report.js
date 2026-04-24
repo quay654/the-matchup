@@ -306,12 +306,6 @@ const ESPN_SPORT_MAP = {
   nhl: { sport: "hockey", league: "nhl" },
 };
 
-// Primary sort stat per sport — resolved dynamically from label array at runtime
-// Actual ESPN labels (verified): NBA: MIN,PTS,FG,3PT,FT,REB,AST,TO,STL,BLK,OREB,DREB,PF,+/-
-//                                 MLB: H-AB,AB,R,H,RBI,HR,BB,K,#P,AVG,OBP,SLG
-//                                 NHL: BS,HT,TK,+/-,TOI,PPTOI,SHTOI,ESTOI,SHFT,G,YTDG,A,...
-//                                 NFL: passing→C/ATT,YDS,AVG,TD,INT | rushing→CAR,YDS,AVG,TD,LONG
-const ESPN_SORT_STAT = { nba: "PTS", mlb: "H", nhl: "G", nfl: "YDS" };
 
 function fetchWithTimeout(url, ms = 5000) {
   const controller = new AbortController();
@@ -334,6 +328,94 @@ async function espnFindTeam(teamName, espn) {
   })?.team || null;
 }
 
+// ── Franchise star map — used as primary identifier, ESPN provides stat lines ─
+const FRANCHISE_STARS = {
+  nba: {
+    "Atlanta Hawks": "Trae Young", "Boston Celtics": "Jayson Tatum",
+    "Brooklyn Nets": "Cam Thomas", "Charlotte Hornets": "LaMelo Ball",
+    "Chicago Bulls": "Zach LaVine", "Cleveland Cavaliers": "Donovan Mitchell",
+    "Dallas Mavericks": "Luka Doncic", "Denver Nuggets": "Nikola Jokic",
+    "Detroit Pistons": "Cade Cunningham", "Golden State Warriors": "Stephen Curry",
+    "Houston Rockets": "Alperen Sengun", "Indiana Pacers": "Tyrese Haliburton",
+    "LA Clippers": "James Harden", "Los Angeles Lakers": "LeBron James",
+    "Memphis Grizzlies": "Ja Morant", "Miami Heat": "Bam Adebayo",
+    "Milwaukee Bucks": "Giannis Antetokounmpo", "Minnesota Timberwolves": "Anthony Edwards",
+    "New Orleans Pelicans": "Zion Williamson", "New York Knicks": "Jalen Brunson",
+    "Oklahoma City Thunder": "Shai Gilgeous-Alexander", "Orlando Magic": "Paolo Banchero",
+    "Philadelphia 76ers": "Tyrese Maxey", "Phoenix Suns": "Devin Booker",
+    "Portland Trail Blazers": "Scoot Henderson", "Sacramento Kings": "De'Aaron Fox",
+    "San Antonio Spurs": "Victor Wembanyama", "Toronto Raptors": "Scottie Barnes",
+    "Utah Jazz": "Lauri Markkanen", "Washington Wizards": "Kyle Kuzma",
+  },
+  nfl: {
+    "Kansas City Chiefs": "Patrick Mahomes", "San Francisco 49ers": "Brock Purdy",
+    "Philadelphia Eagles": "Jalen Hurts", "Buffalo Bills": "Josh Allen",
+    "Dallas Cowboys": "Dak Prescott", "Baltimore Ravens": "Lamar Jackson",
+    "Cincinnati Bengals": "Joe Burrow", "Miami Dolphins": "Tua Tagovailoa",
+    "Detroit Lions": "Jared Goff", "Green Bay Packers": "Jordan Love",
+    "Los Angeles Rams": "Matthew Stafford", "Tampa Bay Buccaneers": "Baker Mayfield",
+    "New York Jets": "Aaron Rodgers", "Seattle Seahawks": "Geno Smith",
+    "Jacksonville Jaguars": "Trevor Lawrence", "Houston Texans": "C.J. Stroud",
+    "Cleveland Browns": "Deshaun Watson", "Pittsburgh Steelers": "Russell Wilson",
+    "Las Vegas Raiders": "Davante Adams", "Los Angeles Chargers": "Justin Herbert",
+    "New England Patriots": "Drake Maye", "Tennessee Titans": "Will Levis",
+    "Indianapolis Colts": "Anthony Richardson", "Denver Broncos": "Bo Nix",
+    "Chicago Bears": "Caleb Williams", "Minnesota Vikings": "Sam Darnold",
+    "New York Giants": "Tommy DeVito", "Washington Commanders": "Jayden Daniels",
+    "New Orleans Saints": "Derek Carr", "Carolina Panthers": "Bryce Young",
+    "Atlanta Falcons": "Kirk Cousins", "Arizona Cardinals": "Kyler Murray",
+  },
+  mlb: {
+    "Los Angeles Dodgers": "Shohei Ohtani", "New York Yankees": "Aaron Judge",
+    "Atlanta Braves": "Ronald Acuna Jr.", "Houston Astros": "Jose Altuve",
+    "Philadelphia Phillies": "Bryce Harper", "Texas Rangers": "Corey Seager",
+    "Seattle Mariners": "Julio Rodriguez", "Baltimore Orioles": "Gunnar Henderson",
+    "Minnesota Twins": "Byron Buxton", "San Diego Padres": "Fernando Tatis Jr.",
+    "Boston Red Sox": "Rafael Devers", "Cleveland Guardians": "Jose Ramirez",
+    "Toronto Blue Jays": "Bo Bichette", "Chicago Cubs": "Cody Bellinger",
+    "Milwaukee Brewers": "Christian Yelich", "San Francisco Giants": "Matt Chapman",
+    "New York Mets": "Francisco Lindor", "Cincinnati Reds": "Elly De La Cruz",
+    "Colorado Rockies": "Ezequiel Tovar", "Pittsburgh Pirates": "Paul Skenes",
+    "Miami Marlins": "Jazz Chisholm", "Arizona Diamondbacks": "Corbin Carroll",
+    "Kansas City Royals": "Bobby Witt Jr.", "St. Louis Cardinals": "Nolan Arenado",
+    "Washington Nationals": "CJ Abrams", "Oakland Athletics": "Brent Rooker",
+    "Chicago White Sox": "Garrett Crochet", "Detroit Tigers": "Spencer Torkelson",
+    "Tampa Bay Rays": "Randy Arozarena", "Los Angeles Angels": "Mike Trout",
+  },
+  nhl: {
+    "Boston Bruins": "David Pastrnak", "Tampa Bay Lightning": "Nikita Kucherov",
+    "Florida Panthers": "Aleksander Barkov", "Toronto Maple Leafs": "Auston Matthews",
+    "Montreal Canadiens": "Cole Caufield", "Ottawa Senators": "Tim Stutzle",
+    "Buffalo Sabres": "Tage Thompson", "Detroit Red Wings": "Dylan Larkin",
+    "Carolina Hurricanes": "Sebastian Aho", "New York Rangers": "Artemi Panarin",
+    "New York Islanders": "Mathew Barzal", "New Jersey Devils": "Jack Hughes",
+    "Philadelphia Flyers": "Travis Konecny", "Pittsburgh Penguins": "Sidney Crosby",
+    "Washington Capitals": "Alex Ovechkin", "Columbus Blue Jackets": "Zach Werenski",
+    "Colorado Avalanche": "Nathan MacKinnon", "Minnesota Wild": "Kirill Kaprizov",
+    "Nashville Predators": "Roman Josi", "Chicago Blackhawks": "Connor Bedard",
+    "St. Louis Blues": "Jordan Kyrou", "Winnipeg Jets": "Mark Scheifele",
+    "Dallas Stars": "Jason Robertson", "Vegas Golden Knights": "Jack Eichel",
+    "Los Angeles Kings": "Anze Kopitar", "Anaheim Ducks": "Trevor Zegras",
+    "San Jose Sharks": "Macklin Celebrini", "Seattle Kraken": "Matty Beniers",
+    "Calgary Flames": "Nazem Kadri", "Vancouver Canucks": "Elias Pettersson",
+    "Edmonton Oilers": "Connor McDavid", "Utah Mammoth": "Clayton Keller",
+  },
+};
+
+function findFranchiseStar(teamName, sport) {
+  const map = FRANCHISE_STARS[sport] || {};
+  const lc = teamName.toLowerCase();
+  for (const [name, star] of Object.entries(map)) {
+    const nameLc = name.toLowerCase();
+    // Match on full name, city, or nickname (last word of team name)
+    const nickname = nameLc.split(" ").slice(-1)[0];
+    if (nameLc.includes(lc) || lc.includes(nickname) || lc.includes(nameLc)) {
+      return star;
+    }
+  }
+  return null;
+}
+
 // ── Real star player data (ESPN) ──────────────────────────────────────────
 function getESPNSeasonYear(sport) {
   const now = new Date();
@@ -347,63 +429,47 @@ function getESPNSeasonYear(sport) {
   return year;
 }
 
-function parseBoxStar(teamBox, sport) {
-  // Parse the box score for the best performer using dynamic label lookup
-  const sortStat = ESPN_SORT_STAT[sport] || "PTS";
-
-  // NFL has multiple stat categories (passing, rushing, receiving) — check each
+// Find a named player's stat line from a box score. Returns statLine string or null.
+function getPlayerStatLine(teamBox, playerName, sport) {
   const statGroups = teamBox.statistics || [];
+  const nameLc = playerName.toLowerCase();
 
-  let bestName = null;
-  let bestValue = -1;
-  let bestStats = null;
-  let bestLabels = null;
+  // For MLB: only look at batting group (has "AB" label) — skip pitching group
+  // to avoid pitchers being selected via their "H" (hits allowed) stat
+  const battingOnly = sport === "mlb";
 
   for (const group of statGroups) {
     const labels = group.labels || [];
-    const sortIdx = labels.indexOf(sortStat);
-    if (sortIdx === -1) continue;
-    for (const athlete of (group.athletes || [])) {
-      const raw = athlete.stats?.[sortIdx];
-      // YDS can be "10/17" for passing completion — grab the numeric part after "/"
-      const val = parseFloat(String(raw || "0").split("/").pop()) || 0;
-      if (val > bestValue) {
-        bestValue = val;
-        bestName = athlete.athlete?.displayName || null;
-        bestStats = athlete.stats || [];
-        bestLabels = labels;
-      }
+    if (battingOnly && !labels.includes("AB")) continue;
+
+    const athlete = (group.athletes || []).find((a) => {
+      const dn = (a.athlete?.displayName || "").toLowerCase();
+      // Match on full name or last name
+      return dn === nameLc || dn.split(" ").slice(-1)[0] === nameLc.split(" ").slice(-1)[0];
+    });
+    if (!athlete) continue;
+
+    const s = athlete.stats || [];
+    const idx = (label) => labels.indexOf(label);
+    let statLine = null;
+
+    if (sport === "nba") {
+      const pts = s[idx("PTS")]; const reb = s[idx("REB")]; const ast = s[idx("AST")];
+      if (pts !== undefined) statLine = `${pts} PTS · ${reb ?? "—"} REB · ${ast ?? "—"} AST`;
+    } else if (sport === "nhl") {
+      const g = s[idx("G")] ?? "0"; const a = s[idx("A")] ?? "0";
+      statLine = `${g} G · ${a} A`;
+    } else if (sport === "mlb") {
+      const h = s[idx("H")] ?? "0"; const ab = s[idx("AB")] ?? "0"; const rbi = s[idx("RBI")] ?? "0";
+      statLine = `${h}-${ab} · ${rbi} RBI`;
+    } else if (sport === "nfl") {
+      const yds = s[idx("YDS")] ?? "0"; const td = s[idx("TD")] ?? "0";
+      const cat = labels.includes("C/ATT") ? "PASS" : labels.includes("CAR") ? "RUSH" : "REC";
+      statLine = `${yds} ${cat} YDS · ${td} TD`;
     }
+    if (statLine) return statLine;
   }
-
-  if (!bestName || !bestLabels) return null;
-
-  // Build the stat line from the actual label positions
-  const idx = (label) => bestLabels.indexOf(label);
-  let statLine = "—";
-
-  if (sport === "nba") {
-    const pts = bestStats[idx("PTS")] ?? "—";
-    const reb = bestStats[idx("REB")] ?? "—";
-    const ast = bestStats[idx("AST")] ?? "—";
-    statLine = `${pts} PTS · ${reb} REB · ${ast} AST`;
-  } else if (sport === "nhl") {
-    const g = bestStats[idx("G")] ?? "0";
-    const a = bestStats[idx("A")] ?? "0";
-    statLine = `${g} G · ${a} A`;
-  } else if (sport === "mlb") {
-    const h = bestStats[idx("H")] ?? "0";
-    const ab = bestStats[idx("AB")] ?? "0";
-    const rbi = bestStats[idx("RBI")] ?? "0";
-    statLine = `${h}-${ab} · ${rbi} RBI`;
-  } else if (sport === "nfl") {
-    const yds = bestStats[idx("YDS")] ?? "0";
-    const td = bestStats[idx("TD")] ?? "0";
-    const cat = bestLabels.includes("C/ATT") ? "PASS" : bestLabels.includes("CAR") ? "RUSH" : "REC";
-    statLine = `${yds} ${cat} YDS · ${td} TD`;
-  }
-
-  return { name: bestName, statLine };
+  return null;
 }
 
 async function fetchRealStarData(teamA, teamB, sport) {
@@ -442,9 +508,9 @@ async function fetchRealStarData(teamA, teamB, sport) {
         )
       );
 
-      // Bug #3 fix: identify the star from the game with most data (first box score),
-      // then track THAT player's stats across all games for consistency
-      let starName = null;
+      // Star identity: hardcoded franchise star map is the source of truth.
+      // Box scores only provide that player's stat line per game.
+      const starName = findFranchiseStar(teamName, sport) || `${teamName} Star`;
       const last5 = [];
 
       for (let i = 0; i < completed.length; i++) {
@@ -469,20 +535,14 @@ async function fetchRealStarData(teamA, teamB, sport) {
           const bs = boxResults[i].value;
           const teamBox = bs.boxscore?.players?.find((p) => p.team?.id === String(teamId));
           if (teamBox) {
-            const parsed = parseBoxStar(teamBox, sport);
-            if (parsed) {
-              // First game establishes the star — subsequent games use the same player
-              if (!starName) starName = parsed.name;
-              // If this game has that player, use their stat line; else keep "—"
-              if (parsed.name === starName) statLine = parsed.statLine;
-            }
+            statLine = getPlayerStatLine(teamBox, starName, sport) || "—";
           }
         }
 
         last5.push({ opp, date, line: statLine, result });
       }
 
-      return { name: starName || `${teamName} Star`, last5, logo };
+      return { name: starName, last5, logo };
     } catch (err) {
       console.error(`ESPN star data error for ${teamName}:`, err);
       return null;
