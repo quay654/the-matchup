@@ -57,32 +57,94 @@ async function checkRateLimit(req) {
   }
 }
 
-// ── API-Sports fetchers ───────────────────────────────────────────────────
-async function fetchInjuries(teamA, teamB, sport) {
-  if (!process.env.API_SPORTS_KEY) return { [teamA]: [], [teamB]: [] };
-  // API-Sports injury endpoint varies by sport — this is the general pattern
-  try {
-    const headers = { "x-apisports-key": process.env.API_SPORTS_KEY };
-    const sportPath = { nba: "basketball", nfl: "american-football", mlb: "baseball", nhl: "hockey" }[sport] || sport;
-    const [resA, resB] = await Promise.allSettled([
-      fetch(`https://v1.${sportPath}.api-sports.io/injuries?team=${encodeURIComponent(teamA)}`, { headers }),
-      fetch(`https://v1.${sportPath}.api-sports.io/injuries?team=${encodeURIComponent(teamB)}`, { headers }),
-    ]);
+// ── ESPN team ID map (stable IDs, no API key required) ────────────────────
+const ESPN_TEAM_IDS = {
+  nba: {
+    "Atlanta Hawks": 1, "Boston Celtics": 2, "Brooklyn Nets": 17, "Charlotte Hornets": 30,
+    "Chicago Bulls": 4, "Cleveland Cavaliers": 5, "Dallas Mavericks": 6, "Denver Nuggets": 7,
+    "Detroit Pistons": 8, "Golden State Warriors": 9, "Houston Rockets": 10, "Indiana Pacers": 11,
+    "LA Clippers": 12, "Los Angeles Lakers": 13, "Memphis Grizzlies": 29, "Miami Heat": 14,
+    "Milwaukee Bucks": 15, "Minnesota Timberwolves": 16, "New Orleans Pelicans": 3,
+    "New York Knicks": 18, "Oklahoma City Thunder": 25, "Orlando Magic": 19, "Philadelphia 76ers": 20,
+    "Phoenix Suns": 21, "Portland Trail Blazers": 22, "Sacramento Kings": 23, "San Antonio Spurs": 24,
+    "Toronto Raptors": 28, "Utah Jazz": 26, "Washington Wizards": 27,
+  },
+  nfl: {
+    "Arizona Cardinals": 22, "Atlanta Falcons": 1, "Baltimore Ravens": 33, "Buffalo Bills": 2,
+    "Carolina Panthers": 29, "Chicago Bears": 3, "Cincinnati Bengals": 4, "Cleveland Browns": 5,
+    "Dallas Cowboys": 6, "Denver Broncos": 7, "Detroit Lions": 8, "Green Bay Packers": 9,
+    "Houston Texans": 34, "Indianapolis Colts": 11, "Jacksonville Jaguars": 30, "Kansas City Chiefs": 12,
+    "Las Vegas Raiders": 13, "Los Angeles Chargers": 24, "Los Angeles Rams": 14, "Miami Dolphins": 15,
+    "Minnesota Vikings": 16, "New England Patriots": 17, "New Orleans Saints": 18, "New York Giants": 19,
+    "New York Jets": 20, "Philadelphia Eagles": 21, "Pittsburgh Steelers": 23, "San Francisco 49ers": 25,
+    "Seattle Seahawks": 26, "Tampa Bay Buccaneers": 27, "Tennessee Titans": 10, "Washington Commanders": 28,
+  },
+  mlb: {
+    "Arizona Diamondbacks": 29, "Athletics": 11, "Atlanta Braves": 15, "Baltimore Orioles": 1,
+    "Boston Red Sox": 2, "Chicago Cubs": 16, "Chicago White Sox": 4, "Cincinnati Reds": 17,
+    "Cleveland Guardians": 5, "Colorado Rockies": 27, "Detroit Tigers": 6, "Houston Astros": 18,
+    "Kansas City Royals": 7, "Los Angeles Angels": 3, "Los Angeles Dodgers": 19, "Miami Marlins": 28,
+    "Milwaukee Brewers": 8, "Minnesota Twins": 9, "New York Mets": 21, "New York Yankees": 10,
+    "Philadelphia Phillies": 22, "Pittsburgh Pirates": 23, "San Diego Padres": 25, "San Francisco Giants": 26,
+    "Seattle Mariners": 12, "St. Louis Cardinals": 24, "Tampa Bay Rays": 30, "Texas Rangers": 13,
+    "Toronto Blue Jays": 14, "Washington Nationals": 20,
+  },
+  nhl: {
+    "Anaheim Ducks": 25, "Boston Bruins": 1, "Buffalo Sabres": 2, "Calgary Flames": 3,
+    "Carolina Hurricanes": 7, "Chicago Blackhawks": 4, "Colorado Avalanche": 17, "Columbus Blue Jackets": 29,
+    "Dallas Stars": 9, "Detroit Red Wings": 5, "Edmonton Oilers": 6, "Florida Panthers": 26,
+    "Los Angeles Kings": 8, "Minnesota Wild": 30, "Montreal Canadiens": 10, "Nashville Predators": 27,
+    "New Jersey Devils": 11, "New York Islanders": 12, "New York Rangers": 13, "Ottawa Senators": 14,
+    "Philadelphia Flyers": 15, "Pittsburgh Penguins": 16, "San Jose Sharks": 18, "Seattle Kraken": 124292,
+    "St. Louis Blues": 19, "Tampa Bay Lightning": 20, "Toronto Maple Leafs": 21, "Utah Mammoth": 129764,
+    "Vancouver Canucks": 22, "Vegas Golden Knights": 37, "Washington Capitals": 23, "Winnipeg Jets": 28,
+  },
+};
 
-    const parse = async (r) => {
-      if (r.status !== "fulfilled" || !r.value.ok) return [];
-      const data = await r.value.json();
-      return (data.response || []).slice(0, 5).map((p) => ({
-        player: p.player?.name || p.name || "Unknown",
-        status: p.status || "Questionable",
-        note: p.reason || p.type || "",
-      }));
-    };
-
-    return { [teamA]: await parse(resA), [teamB]: await parse(resB) };
-  } catch {
-    return { [teamA]: [], [teamB]: [] };
+function findESPNTeamId(teamName, sport) {
+  const map = ESPN_TEAM_IDS[sport] || {};
+  const lc = teamName.toLowerCase();
+  for (const [name, id] of Object.entries(map)) {
+    if (name.toLowerCase().includes(lc) || lc.includes(name.toLowerCase().split(" ").slice(-1)[0].toLowerCase())) {
+      return id;
+    }
   }
+  return null;
+}
+
+// ── ESPN injuries (Bug #2 fix — replaces broken API-Sports call) ──────────
+async function fetchInjuries(teamA, teamB, sport) {
+  const espn = ESPN_SPORT_MAP[sport];
+  if (!espn) return { [teamA]: [], [teamB]: [] };
+
+  const STATUS_MAP = {
+    "Out": "Out", "Doubtful": "Doubtful", "Questionable": "Questionable",
+    "Probable": "Probable", "Day-To-Day": "Questionable", "IR": "Out",
+    "PUP": "Out", "Suspended": "Out",
+  };
+
+  async function getInjuries(teamName) {
+    try {
+      const teamId = findESPNTeamId(teamName, sport);
+      if (!teamId) return [];
+      const url = `https://site.api.espn.com/apis/site/v2/sports/${espn.sport}/${espn.league}/teams/${teamId}/injuries`;
+      const res = await fetchWithTimeout(url);
+      const data = await res.json();
+      return (data.items || []).slice(0, 6).map((item) => ({
+        player: item.athlete?.displayName || "Unknown",
+        status: STATUS_MAP[item.status] || item.status || "Questionable",
+        note: [item.details?.type, item.details?.side].filter(Boolean).join(" ") || item.type || "",
+      }));
+    } catch {
+      return [];
+    }
+  }
+
+  const [resA, resB] = await Promise.allSettled([getInjuries(teamA), getInjuries(teamB)]);
+  return {
+    [teamA]: resA.status === "fulfilled" ? resA.value : [],
+    [teamB]: resB.status === "fulfilled" ? resB.value : [],
+  };
 }
 
 async function fetchOdds(teamA, teamB, sport) {
@@ -235,17 +297,6 @@ function deriveWeatherImpact(temp, wind, condition) {
   return "Mild conditions — minimal weather impact expected.";
 }
 
-// ── Season helper ─────────────────────────────────────────────────────────
-function getCurrentSeason(sport) {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = now.getMonth() + 1;
-  if (sport === "nba" || sport === "nhl") {
-    if (month >= 9) return `${year}-${String(year + 1).slice(-2)}`;
-    return `${year - 1}-${String(year).slice(-2)}`;
-  }
-  return String(year);
-}
 
 // ── ESPN helpers ──────────────────────────────────────────────────────────
 const ESPN_SPORT_MAP = {
@@ -255,13 +306,12 @@ const ESPN_SPORT_MAP = {
   nhl: { sport: "hockey", league: "nhl" },
 };
 
-// Stat label positions per sport in ESPN box score
-const ESPN_STAT_LABELS = {
-  nba: { pts: 13, reb: 6, ast: 7 },     // MIN,FG,3PT,FT,OREB,DREB,REB,AST,STL,BLK,TO,PF,+/-,PTS
-  nfl: { passYds: 1, rushYds: 8, tds: 3 }, // approximate — varies by position
-  mlb: { h: 2, rbi: 3, hr: 4 },
-  nhl: { goals: 0, assists: 1 },
-};
+// Primary sort stat per sport — resolved dynamically from label array at runtime
+// Actual ESPN labels (verified): NBA: MIN,PTS,FG,3PT,FT,REB,AST,TO,STL,BLK,OREB,DREB,PF,+/-
+//                                 MLB: H-AB,AB,R,H,RBI,HR,BB,K,#P,AVG,OBP,SLG
+//                                 NHL: BS,HT,TK,+/-,TOI,PPTOI,SHTOI,ESTOI,SHFT,G,YTDG,A,...
+//                                 NFL: passing→C/ATT,YDS,AVG,TD,INT | rushing→CAR,YDS,AVG,TD,LONG
+const ESPN_SORT_STAT = { nba: "PTS", mlb: "H", nhl: "G", nfl: "YDS" };
 
 function fetchWithTimeout(url, ms = 5000) {
   const controller = new AbortController();
@@ -285,12 +335,83 @@ async function espnFindTeam(teamName, espn) {
 }
 
 // ── Real star player data (ESPN) ──────────────────────────────────────────
+function getESPNSeasonYear(sport) {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = now.getMonth() + 1;
+  // NBA/NHL season year is the year the season ends (e.g. 2024-25 → 2025)
+  if (sport === "nba" || sport === "nhl") return month >= 9 ? year + 1 : year;
+  // NFL: season year is the calendar year it starts
+  if (sport === "nfl") return month >= 3 ? year : year - 1;
+  // MLB: calendar year
+  return year;
+}
+
+function parseBoxStar(teamBox, sport) {
+  // Parse the box score for the best performer using dynamic label lookup
+  const sortStat = ESPN_SORT_STAT[sport] || "PTS";
+
+  // NFL has multiple stat categories (passing, rushing, receiving) — check each
+  const statGroups = teamBox.statistics || [];
+
+  let bestName = null;
+  let bestValue = -1;
+  let bestStats = null;
+  let bestLabels = null;
+
+  for (const group of statGroups) {
+    const labels = group.labels || [];
+    const sortIdx = labels.indexOf(sortStat);
+    if (sortIdx === -1) continue;
+    for (const athlete of (group.athletes || [])) {
+      const raw = athlete.stats?.[sortIdx];
+      // YDS can be "10/17" for passing completion — grab the numeric part after "/"
+      const val = parseFloat(String(raw || "0").split("/").pop()) || 0;
+      if (val > bestValue) {
+        bestValue = val;
+        bestName = athlete.athlete?.displayName || null;
+        bestStats = athlete.stats || [];
+        bestLabels = labels;
+      }
+    }
+  }
+
+  if (!bestName || !bestLabels) return null;
+
+  // Build the stat line from the actual label positions
+  const idx = (label) => bestLabels.indexOf(label);
+  let statLine = "—";
+
+  if (sport === "nba") {
+    const pts = bestStats[idx("PTS")] ?? "—";
+    const reb = bestStats[idx("REB")] ?? "—";
+    const ast = bestStats[idx("AST")] ?? "—";
+    statLine = `${pts} PTS · ${reb} REB · ${ast} AST`;
+  } else if (sport === "nhl") {
+    const g = bestStats[idx("G")] ?? "0";
+    const a = bestStats[idx("A")] ?? "0";
+    statLine = `${g} G · ${a} A`;
+  } else if (sport === "mlb") {
+    const h = bestStats[idx("H")] ?? "0";
+    const ab = bestStats[idx("AB")] ?? "0";
+    const rbi = bestStats[idx("RBI")] ?? "0";
+    statLine = `${h}-${ab} · ${rbi} RBI`;
+  } else if (sport === "nfl") {
+    const yds = bestStats[idx("YDS")] ?? "0";
+    const td = bestStats[idx("TD")] ?? "0";
+    const cat = bestLabels.includes("C/ATT") ? "PASS" : bestLabels.includes("CAR") ? "RUSH" : "REC";
+    statLine = `${yds} ${cat} YDS · ${td} TD`;
+  }
+
+  return { name: bestName, statLine };
+}
+
 async function fetchRealStarData(teamA, teamB, sport) {
   const espn = ESPN_SPORT_MAP[sport];
   if (!espn) return null;
 
   const base = `https://site.api.espn.com/apis/site/v2/sports/${espn.sport}/${espn.league}`;
-  const statLabels = ESPN_STAT_LABELS[sport] || {};
+  const seasonYear = getESPNSeasonYear(sport);
 
   async function getTeamStar(teamName) {
     try {
@@ -299,23 +420,31 @@ async function fetchRealStarData(teamA, teamB, sport) {
       const teamId = team.id;
       const logo = team.logos?.[0]?.href || null;
 
-      // Get team schedule to find last 3 completed games (3 = fast, enough for context)
-      const schedRes = await fetchWithTimeout(`${base}/teams/${teamId}/schedule`);
+      // Bug #4 fix: fetch full regular season schedule (82 NBA / 162 MLB games)
+      // seasontype=2 = regular season, gives us many more completed games to pick from
+      const schedRes = await fetchWithTimeout(
+        `${base}/teams/${teamId}/schedule?season=${seasonYear}&seasontype=2`
+      );
       const schedData = await schedRes.json();
       const events = schedData.events || [];
+
       const completed = events
         .filter((e) => e.competitions?.[0]?.status?.type?.completed === true)
-        .slice(-3)
-        .reverse();
+        .slice(-5)   // last 5 completed regular-season games
+        .reverse();  // most recent first
 
       if (!completed.length) return null;
 
-      // Fetch box scores for all 3 games in parallel with timeout
+      // Fetch box scores in parallel
       const boxResults = await Promise.allSettled(
-        completed.map((e) => fetchWithTimeout(`${base}/summary?event=${e.id}`).then((r) => r.json()))
+        completed.map((e) =>
+          fetchWithTimeout(`${base}/summary?event=${e.id}`).then((r) => r.json())
+        )
       );
 
-      let playerName = `${teamName} Star`;
+      // Bug #3 fix: identify the star from the game with most data (first box score),
+      // then track THAT player's stats across all games for consistency
+      let starName = null;
       const last5 = [];
 
       for (let i = 0; i < completed.length; i++) {
@@ -340,34 +469,12 @@ async function fetchRealStarData(teamA, teamB, sport) {
           const bs = boxResults[i].value;
           const teamBox = bs.boxscore?.players?.find((p) => p.team?.id === String(teamId));
           if (teamBox) {
-            const athletes = teamBox.statistics?.[0]?.athletes || [];
-            const ptsIdx = statLabels.pts ?? 13;
-            const sorted = athletes
-              .filter((a) => a.stats?.length > ptsIdx)
-              .sort((a, b) => parseFloat(b.stats[ptsIdx] || 0) - parseFloat(a.stats[ptsIdx] || 0));
-
-            if (sorted[0]) {
-              // Use the top scorer's name as the star player name
-              playerName = sorted[0].athlete?.displayName || playerName;
-              const s = sorted[0].stats;
-
-              if (sport === "nba") {
-                const pts = s[13] || "0";
-                const reb = s[6] || "0";
-                const ast = s[7] || "0";
-                statLine = `${pts} PTS · ${reb} REB · ${ast} AST`;
-              } else if (sport === "nhl") {
-                statLine = `${s[0] || 0} G · ${s[1] || 0} A`;
-              } else if (sport === "mlb") {
-                statLine = `${s[2] || 0}-${s[0] || 0} · ${s[3] || 0} RBI`;
-              } else if (sport === "nfl") {
-                // NFL: try passing stats first, then rushing
-                const passYds = parseFloat(s[1] || 0);
-                const rushYds = parseFloat(s[8] || 0);
-                statLine = passYds > 0
-                  ? `${passYds} PASS YDS · ${s[3] || 0} TD`
-                  : `${rushYds} RUSH YDS`;
-              }
+            const parsed = parseBoxStar(teamBox, sport);
+            if (parsed) {
+              // First game establishes the star — subsequent games use the same player
+              if (!starName) starName = parsed.name;
+              // If this game has that player, use their stat line; else keep "—"
+              if (parsed.name === starName) statLine = parsed.statLine;
             }
           }
         }
@@ -375,7 +482,7 @@ async function fetchRealStarData(teamA, teamB, sport) {
         last5.push({ opp, date, line: statLine, result });
       }
 
-      return { name: playerName, last5, logo };
+      return { name: starName || `${teamName} Star`, last5, logo };
     } catch (err) {
       console.error(`ESPN star data error for ${teamName}:`, err);
       return null;
@@ -473,9 +580,8 @@ async function fetchRealH2H(teamA, teamB, sport) {
 }
 
 // ── MLB-specific fetchers ─────────────────────────────────────────────────
-async function fetchMLBPitchers(teamA, teamB) {
-  if (!process.env.API_SPORTS_KEY) return null;
-  // Return null — API-Sports MLB pitcher data requires specific game ID
+async function fetchMLBPitchers() {
+  // MLB pitcher data requires a specific game ID — not yet implemented
   return null;
 }
 
@@ -636,7 +742,7 @@ export default async function handler(req, res) {
     fetchInjuries(teamA, teamB, sport),
     fetchOdds(teamA, teamB, sport),
     fetchWeather(venue),
-    sport === "mlb" ? fetchMLBPitchers(teamA, teamB) : Promise.resolve(null),
+    sport === "mlb" ? fetchMLBPitchers() : Promise.resolve(null),
     fetchRealStarData(teamA, teamB, sport),
     fetchRealH2H(teamA, teamB, sport),
   ]);
