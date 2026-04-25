@@ -421,12 +421,32 @@ function getESPNSeasonYear(sport) {
   const now = new Date();
   const year = now.getFullYear();
   const month = now.getMonth() + 1;
-  // NBA/NHL season year is the year the season ends (e.g. 2024-25 → 2025)
   if (sport === "nba" || sport === "nhl") return month >= 9 ? year + 1 : year;
-  // NFL: season year is the calendar year it starts
   if (sport === "nfl") return month >= 3 ? year : year - 1;
-  // MLB: calendar year
   return year;
+}
+
+// Returns seasontype priority list for the current date per sport.
+// ESPN: 1=preseason, 2=regular season, 3=postseason.
+// Primary is tried first; if < 5 completed games found, secondary supplements.
+function getSeasonTypePriority(sport) {
+  const month = new Date().getMonth() + 1; // 1–12
+  if (sport === "nba" || sport === "nhl") {
+    // Playoffs: mid-April through June
+    if (month >= 4 && month <= 6) return [3, 2];
+    return [2];
+  }
+  if (sport === "nfl") {
+    // Playoffs: January–February
+    if (month <= 2) return [3, 2];
+    return [2];
+  }
+  if (sport === "mlb") {
+    // Playoffs: October
+    if (month === 10) return [3, 2];
+    return [2];
+  }
+  return [2];
 }
 
 // Find a named player's stat line from a box score. Returns statLine string or null.
@@ -486,18 +506,32 @@ async function fetchRealStarData(teamA, teamB, sport) {
       const teamId = team.id;
       const logo = team.logos?.[0]?.href || null;
 
-      // Bug #4 fix: fetch full regular season schedule (82 NBA / 162 MLB games)
-      // seasontype=2 = regular season, gives us many more completed games to pick from
-      const schedRes = await fetchWithTimeout(
-        `${base}/teams/${teamId}/schedule?season=${seasonYear}&seasontype=2`
-      );
-      const schedData = await schedRes.json();
-      const events = schedData.events || [];
+      // Fetch from the correct season phase (playoff vs regular) with fallback.
+      // Priority: e.g. during NBA playoffs → [3, 2] tries postseason first,
+      // supplements with regular season if fewer than 5 completed games found.
+      const seasonTypes = getSeasonTypePriority(sport);
+      const seenIds = new Set();
+      let allCompleted = [];
 
-      const completed = events
-        .filter((e) => e.competitions?.[0]?.status?.type?.completed === true)
-        .slice(-5)   // last 5 completed regular-season games
-        .reverse();  // most recent first
+      for (const seasonType of seasonTypes) {
+        if (allCompleted.length >= 5) break;
+        try {
+          const r = await fetchWithTimeout(
+            `${base}/teams/${teamId}/schedule?season=${seasonYear}&seasontype=${seasonType}`
+          );
+          const d = await r.json();
+          for (const e of (d.events || [])) {
+            if (e.competitions?.[0]?.status?.type?.completed && !seenIds.has(e.id)) {
+              seenIds.add(e.id);
+              allCompleted.push(e);
+            }
+          }
+        } catch { /* try next seasontype */ }
+      }
+
+      // Sort all collected games by date descending, take 5 most recent
+      allCompleted.sort((a, b) => new Date(b.date) - new Date(a.date));
+      const completed = allCompleted.slice(0, 5).reverse(); // oldest→newest for display
 
       if (!completed.length) return null;
 
@@ -581,21 +615,34 @@ async function fetchRealH2H(teamA, teamB, sport) {
     const tB = teamBData.status === "fulfilled" ? teamBData.value : null;
     if (!tA || !tB) return null;
 
-    // Get teamA's schedule and find games vs teamB
-    const schedRes = await fetchWithTimeout(`${base}/teams/${tA.id}/schedule`);
-    const schedData = await schedRes.json();
-    const events = schedData.events || [];
+    // Get teamA's schedule across relevant season phases, find games vs teamB
+    const seasonYear = getESPNSeasonYear(sport);
+    const seasonTypes = getSeasonTypePriority(sport);
+    const seenH2H = new Set();
+    let allEvents = [];
 
-    const h2hGames = events
+    for (const seasonType of seasonTypes) {
+      try {
+        const r = await fetchWithTimeout(
+          `${base}/teams/${tA.id}/schedule?season=${seasonYear}&seasontype=${seasonType}`
+        );
+        const d = await r.json();
+        for (const e of (d.events || [])) {
+          if (!seenH2H.has(e.id)) { seenH2H.add(e.id); allEvents.push(e); }
+        }
+      } catch { /* continue */ }
+    }
+
+    const h2hGames = allEvents
       .filter((e) => {
-        const comp = e.competitions?.[0];
-        const opponents = comp?.competitors || [];
+        const opponents = e.competitions?.[0]?.competitors || [];
         return (
           e.competitions?.[0]?.status?.type?.completed === true &&
           opponents.some((c) => c.team?.id === String(tB.id))
         );
       })
-      .slice(-5)
+      .sort((a, b) => new Date(b.date) - new Date(a.date))
+      .slice(0, 5)
       .reverse();
 
     if (!h2hGames.length) return null;
