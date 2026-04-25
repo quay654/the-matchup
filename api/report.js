@@ -5,29 +5,159 @@
 import { Redis } from "@upstash/redis";
 import Anthropic from "@anthropic-ai/sdk";
 
-// ── Static venue map (matches prototype exactly) ───────────────────────────
+// ── Venue map — full 4-league coverage, keyed by ESPN full team name ────────
+// outdoor:true = exposed sky (weather matters). retractable = roof can open/close.
+// lat/lon only present on outdoor venues (needed for weather API).
 const VENUES = {
-  Celtics: { name: "TD Garden", city: "Boston, MA", lat: 42.366, lon: -71.062, outdoor: false },
-  Nuggets: { name: "Ball Arena", city: "Denver, CO", lat: 39.749, lon: -105.007, outdoor: false },
-  "76ers": { name: "Wells Fargo Center", city: "Philadelphia, PA", lat: 39.901, lon: -75.172, outdoor: false },
-  Lakers: { name: "Crypto.com Arena", city: "Los Angeles, CA", lat: 34.043, lon: -118.267, outdoor: false },
-  Warriors: { name: "Chase Center", city: "San Francisco, CA", lat: 37.768, lon: -122.388, outdoor: false },
-  Bucks: { name: "Fiserv Forum", city: "Milwaukee, WI", lat: 43.045, lon: -87.917, outdoor: false },
-  Bills: { name: "Highmark Stadium", city: "Orchard Park, NY", lat: 42.774, lon: -78.787, outdoor: true },
-  Cowboys: { name: "AT&T Stadium", city: "Arlington, TX", lat: 32.748, lon: -97.094, outdoor: false, retractable: true },
-  Rams: { name: "SoFi Stadium", city: "Inglewood, CA", lat: 33.953, lon: -118.339, outdoor: false, retractable: true },
-  Chiefs: { name: "Arrowhead Stadium", city: "Kansas City, MO", lat: 39.049, lon: -94.484, outdoor: true },
-  Eagles: { name: "Lincoln Financial Field", city: "Philadelphia, PA", lat: 39.901, lon: -75.168, outdoor: true },
-  "49ers": { name: "Levi's Stadium", city: "Santa Clara, CA", lat: 37.403, lon: -121.970, outdoor: true },
-  Yankees: { name: "Yankee Stadium", city: "Bronx, NY", lat: 40.829, lon: -73.926, outdoor: true },
-  Braves: { name: "Truist Park", city: "Atlanta, GA", lat: 33.891, lon: -84.468, outdoor: true },
-  Dodgers: { name: "Dodger Stadium", city: "Los Angeles, CA", lat: 34.074, lon: -118.240, outdoor: true },
-  Astros: { name: "Minute Maid Park", city: "Houston, TX", lat: 29.757, lon: -95.355, outdoor: false, retractable: true },
-  Rangers: { name: "Madison Square Garden", city: "New York, NY", lat: 40.750, lon: -73.994, outdoor: false },
-  Bruins: { name: "TD Garden", city: "Boston, MA", lat: 42.366, lon: -71.062, outdoor: false },
-  Oilers: { name: "Rogers Place", city: "Edmonton, AB", lat: 53.547, lon: -113.498, outdoor: false },
-  "Maple Leafs": { name: "Scotiabank Arena", city: "Toronto, ON", lat: 43.643, lon: -79.379, outdoor: false },
+  // ── NBA ───────────────────────────────────────────────────────────────────
+  "Atlanta Hawks":           { name: "State Farm Arena",            city: "Atlanta, GA",           outdoor: false },
+  "Boston Celtics":          { name: "TD Garden",                   city: "Boston, MA",             outdoor: false },
+  "Brooklyn Nets":           { name: "Barclays Center",             city: "Brooklyn, NY",           outdoor: false },
+  "Charlotte Hornets":       { name: "Spectrum Center",             city: "Charlotte, NC",          outdoor: false },
+  "Chicago Bulls":           { name: "United Center",               city: "Chicago, IL",            outdoor: false },
+  "Cleveland Cavaliers":     { name: "Rocket Mortgage FieldHouse",  city: "Cleveland, OH",          outdoor: false },
+  "Dallas Mavericks":        { name: "American Airlines Center",    city: "Dallas, TX",             outdoor: false },
+  "Denver Nuggets":          { name: "Ball Arena",                  city: "Denver, CO",             outdoor: false },
+  "Detroit Pistons":         { name: "Little Caesars Arena",        city: "Detroit, MI",            outdoor: false },
+  "Golden State Warriors":   { name: "Chase Center",                city: "San Francisco, CA",      outdoor: false },
+  "Houston Rockets":         { name: "Toyota Center",               city: "Houston, TX",            outdoor: false },
+  "Indiana Pacers":          { name: "Gainbridge Fieldhouse",       city: "Indianapolis, IN",       outdoor: false },
+  "LA Clippers":             { name: "Intuit Dome",                 city: "Inglewood, CA",          outdoor: false },
+  "Los Angeles Lakers":      { name: "Crypto.com Arena",            city: "Los Angeles, CA",        outdoor: false },
+  "Memphis Grizzlies":       { name: "FedExForum",                  city: "Memphis, TN",            outdoor: false },
+  "Miami Heat":              { name: "Kaseya Center",               city: "Miami, FL",              outdoor: false },
+  "Milwaukee Bucks":         { name: "Fiserv Forum",                city: "Milwaukee, WI",          outdoor: false },
+  "Minnesota Timberwolves":  { name: "Target Center",               city: "Minneapolis, MN",        outdoor: false },
+  "New Orleans Pelicans":    { name: "Smoothie King Center",        city: "New Orleans, LA",        outdoor: false },
+  "New York Knicks":         { name: "Madison Square Garden",       city: "New York, NY",           outdoor: false },
+  "Oklahoma City Thunder":   { name: "Paycom Center",               city: "Oklahoma City, OK",      outdoor: false },
+  "Orlando Magic":           { name: "Kia Center",                  city: "Orlando, FL",            outdoor: false },
+  "Philadelphia 76ers":      { name: "Wells Fargo Center",          city: "Philadelphia, PA",       outdoor: false },
+  "Phoenix Suns":            { name: "Footprint Center",            city: "Phoenix, AZ",            outdoor: false },
+  "Portland Trail Blazers":  { name: "Moda Center",                 city: "Portland, OR",           outdoor: false },
+  "Sacramento Kings":        { name: "Golden 1 Center",             city: "Sacramento, CA",         outdoor: false },
+  "San Antonio Spurs":       { name: "Frost Bank Center",           city: "San Antonio, TX",        outdoor: false },
+  "Toronto Raptors":         { name: "Scotiabank Arena",            city: "Toronto, ON",            outdoor: false },
+  "Utah Jazz":               { name: "Delta Center",                city: "Salt Lake City, UT",     outdoor: false },
+  "Washington Wizards":      { name: "Capital One Arena",           city: "Washington, DC",         outdoor: false },
+
+  // ── NFL ───────────────────────────────────────────────────────────────────
+  "Arizona Cardinals":    { name: "State Farm Stadium",         city: "Glendale, AZ",         outdoor: false, retractable: true },
+  "Atlanta Falcons":      { name: "Mercedes-Benz Stadium",      city: "Atlanta, GA",          outdoor: false, retractable: true },
+  "Baltimore Ravens":     { name: "M&T Bank Stadium",           city: "Baltimore, MD",        outdoor: true,  lat: 39.278, lon: -76.623 },
+  "Buffalo Bills":        { name: "Highmark Stadium",           city: "Orchard Park, NY",    outdoor: true,  lat: 42.774, lon: -78.787 },
+  "Carolina Panthers":    { name: "Bank of America Stadium",    city: "Charlotte, NC",        outdoor: true,  lat: 35.226, lon: -80.853 },
+  "Chicago Bears":        { name: "Soldier Field",              city: "Chicago, IL",          outdoor: true,  lat: 41.862, lon: -87.617 },
+  "Cincinnati Bengals":   { name: "Paycor Stadium",             city: "Cincinnati, OH",       outdoor: true,  lat: 39.095, lon: -84.516 },
+  "Cleveland Browns":     { name: "Huntington Bank Field",      city: "Cleveland, OH",        outdoor: true,  lat: 41.506, lon: -81.699 },
+  "Dallas Cowboys":       { name: "AT&T Stadium",               city: "Arlington, TX",        outdoor: false, retractable: true },
+  "Denver Broncos":       { name: "Empower Field at Mile High", city: "Denver, CO",           outdoor: true,  lat: 39.744, lon: -105.020 },
+  "Detroit Lions":        { name: "Ford Field",                 city: "Detroit, MI",          outdoor: false },
+  "Green Bay Packers":    { name: "Lambeau Field",              city: "Green Bay, WI",        outdoor: true,  lat: 44.501, lon: -88.062 },
+  "Houston Texans":       { name: "NRG Stadium",                city: "Houston, TX",          outdoor: false, retractable: true },
+  "Indianapolis Colts":   { name: "Lucas Oil Stadium",          city: "Indianapolis, IN",     outdoor: false, retractable: true },
+  "Jacksonville Jaguars": { name: "EverBank Stadium",           city: "Jacksonville, FL",     outdoor: true,  lat: 30.324, lon: -81.637 },
+  "Kansas City Chiefs":   { name: "Arrowhead Stadium",          city: "Kansas City, MO",      outdoor: true,  lat: 39.049, lon: -94.484 },
+  "Las Vegas Raiders":    { name: "Allegiant Stadium",          city: "Las Vegas, NV",        outdoor: false },
+  "Los Angeles Chargers": { name: "SoFi Stadium",               city: "Inglewood, CA",        outdoor: false, retractable: true },
+  "Los Angeles Rams":     { name: "SoFi Stadium",               city: "Inglewood, CA",        outdoor: false, retractable: true },
+  "Miami Dolphins":       { name: "Hard Rock Stadium",          city: "Miami Gardens, FL",    outdoor: true,  lat: 25.958, lon: -80.239 },
+  "Minnesota Vikings":    { name: "U.S. Bank Stadium",          city: "Minneapolis, MN",      outdoor: false },
+  "New England Patriots": { name: "Gillette Stadium",           city: "Foxborough, MA",       outdoor: true,  lat: 42.091, lon: -71.264 },
+  "New Orleans Saints":   { name: "Caesars Superdome",          city: "New Orleans, LA",      outdoor: false },
+  "New York Giants":      { name: "MetLife Stadium",            city: "East Rutherford, NJ",  outdoor: true,  lat: 40.814, lon: -74.074 },
+  "New York Jets":        { name: "MetLife Stadium",            city: "East Rutherford, NJ",  outdoor: true,  lat: 40.814, lon: -74.074 },
+  "Philadelphia Eagles":  { name: "Lincoln Financial Field",    city: "Philadelphia, PA",     outdoor: true,  lat: 39.901, lon: -75.168 },
+  "Pittsburgh Steelers":  { name: "Acrisure Stadium",           city: "Pittsburgh, PA",       outdoor: true,  lat: 40.447, lon: -80.016 },
+  "San Francisco 49ers":  { name: "Levi's Stadium",             city: "Santa Clara, CA",      outdoor: true,  lat: 37.403, lon: -121.970 },
+  "Seattle Seahawks":     { name: "Lumen Field",                city: "Seattle, WA",          outdoor: true,  lat: 47.596, lon: -122.332 },
+  "Tampa Bay Buccaneers": { name: "Raymond James Stadium",      city: "Tampa, FL",            outdoor: true,  lat: 27.976, lon: -82.503 },
+  "Tennessee Titans":     { name: "Nissan Stadium",             city: "Nashville, TN",        outdoor: true,  lat: 36.166, lon: -86.771 },
+  "Washington Commanders":{ name: "Northwest Stadium",          city: "Landover, MD",         outdoor: true,  lat: 38.908, lon: -76.864 },
+
+  // ── MLB ───────────────────────────────────────────────────────────────────
+  "Arizona Diamondbacks": { name: "Chase Field",                 city: "Phoenix, AZ",          outdoor: false, retractable: true },
+  "Athletics":            { name: "Sutter Health Park",          city: "Sacramento, CA",       outdoor: true,  lat: 38.580, lon: -121.500 },
+  "Atlanta Braves":       { name: "Truist Park",                 city: "Cumberland, GA",       outdoor: true,  lat: 33.891, lon: -84.468 },
+  "Baltimore Orioles":    { name: "Oriole Park at Camden Yards", city: "Baltimore, MD",        outdoor: true,  lat: 39.284, lon: -76.622 },
+  "Boston Red Sox":       { name: "Fenway Park",                 city: "Boston, MA",           outdoor: true,  lat: 42.347, lon: -71.097 },
+  "Chicago Cubs":         { name: "Wrigley Field",               city: "Chicago, IL",          outdoor: true,  lat: 41.948, lon: -87.656 },
+  "Chicago White Sox":    { name: "Guaranteed Rate Field",       city: "Chicago, IL",          outdoor: true,  lat: 41.830, lon: -87.634 },
+  "Cincinnati Reds":      { name: "Great American Ball Park",    city: "Cincinnati, OH",       outdoor: true,  lat: 39.097, lon: -84.507 },
+  "Cleveland Guardians":  { name: "Progressive Field",           city: "Cleveland, OH",        outdoor: true,  lat: 41.496, lon: -81.685 },
+  "Colorado Rockies":     { name: "Coors Field",                 city: "Denver, CO",           outdoor: true,  lat: 39.756, lon: -104.994 },
+  "Detroit Tigers":       { name: "Comerica Park",               city: "Detroit, MI",          outdoor: true,  lat: 42.339, lon: -83.048 },
+  "Houston Astros":       { name: "Minute Maid Park",            city: "Houston, TX",          outdoor: false, retractable: true },
+  "Kansas City Royals":   { name: "Kauffman Stadium",            city: "Kansas City, MO",      outdoor: true,  lat: 39.052, lon: -94.481 },
+  "Los Angeles Angels":   { name: "Angel Stadium",               city: "Anaheim, CA",          outdoor: true,  lat: 33.800, lon: -117.883 },
+  "Los Angeles Dodgers":  { name: "Dodger Stadium",              city: "Los Angeles, CA",      outdoor: true,  lat: 34.074, lon: -118.240 },
+  "Miami Marlins":        { name: "loanDepot park",              city: "Miami, FL",            outdoor: false, retractable: true },
+  "Milwaukee Brewers":    { name: "American Family Field",       city: "Milwaukee, WI",        outdoor: false, retractable: true },
+  "Minnesota Twins":      { name: "Target Field",                city: "Minneapolis, MN",      outdoor: true,  lat: 44.982, lon: -93.278 },
+  "New York Mets":        { name: "Citi Field",                  city: "Flushing, NY",         outdoor: true,  lat: 40.757, lon: -73.846 },
+  "New York Yankees":     { name: "Yankee Stadium",              city: "Bronx, NY",            outdoor: true,  lat: 40.829, lon: -73.926 },
+  "Philadelphia Phillies":{ name: "Citizens Bank Park",          city: "Philadelphia, PA",     outdoor: true,  lat: 39.906, lon: -75.166 },
+  "Pittsburgh Pirates":   { name: "PNC Park",                    city: "Pittsburgh, PA",       outdoor: true,  lat: 40.447, lon: -80.006 },
+  "San Diego Padres":     { name: "Petco Park",                  city: "San Diego, CA",        outdoor: true,  lat: 32.707, lon: -117.157 },
+  "San Francisco Giants": { name: "Oracle Park",                 city: "San Francisco, CA",    outdoor: true,  lat: 37.778, lon: -122.389 },
+  "Seattle Mariners":     { name: "T-Mobile Park",               city: "Seattle, WA",          outdoor: false, retractable: true },
+  "St. Louis Cardinals":  { name: "Busch Stadium",               city: "St. Louis, MO",        outdoor: true,  lat: 38.623, lon: -90.193 },
+  "Tampa Bay Rays":       { name: "Tropicana Field",             city: "St. Petersburg, FL",   outdoor: false },
+  "Texas Rangers":        { name: "Globe Life Field",            city: "Arlington, TX",        outdoor: false, retractable: true },
+  "Toronto Blue Jays":    { name: "Rogers Centre",               city: "Toronto, ON",          outdoor: false, retractable: true },
+  "Washington Nationals": { name: "Nationals Park",              city: "Washington, DC",       outdoor: true,  lat: 38.873, lon: -77.007 },
+
+  // ── NHL ───────────────────────────────────────────────────────────────────
+  "Anaheim Ducks":         { name: "Honda Center",               city: "Anaheim, CA",          outdoor: false },
+  "Boston Bruins":         { name: "TD Garden",                  city: "Boston, MA",           outdoor: false },
+  "Buffalo Sabres":        { name: "KeyBank Center",             city: "Buffalo, NY",          outdoor: false },
+  "Calgary Flames":        { name: "Scotiabank Saddledome",      city: "Calgary, AB",          outdoor: false },
+  "Carolina Hurricanes":   { name: "PNC Arena",                  city: "Raleigh, NC",          outdoor: false },
+  "Chicago Blackhawks":    { name: "United Center",              city: "Chicago, IL",          outdoor: false },
+  "Colorado Avalanche":    { name: "Ball Arena",                 city: "Denver, CO",           outdoor: false },
+  "Columbus Blue Jackets": { name: "Nationwide Arena",           city: "Columbus, OH",         outdoor: false },
+  "Dallas Stars":          { name: "American Airlines Center",   city: "Dallas, TX",           outdoor: false },
+  "Detroit Red Wings":     { name: "Little Caesars Arena",       city: "Detroit, MI",          outdoor: false },
+  "Edmonton Oilers":       { name: "Rogers Place",               city: "Edmonton, AB",         outdoor: false },
+  "Florida Panthers":      { name: "Amerant Bank Arena",         city: "Sunrise, FL",          outdoor: false },
+  "Los Angeles Kings":     { name: "Crypto.com Arena",           city: "Los Angeles, CA",      outdoor: false },
+  "Minnesota Wild":        { name: "Xcel Energy Center",         city: "St. Paul, MN",         outdoor: false },
+  "Montreal Canadiens":    { name: "Bell Centre",                city: "Montreal, QC",         outdoor: false },
+  "Nashville Predators":   { name: "Bridgestone Arena",          city: "Nashville, TN",        outdoor: false },
+  "New Jersey Devils":     { name: "Prudential Center",          city: "Newark, NJ",           outdoor: false },
+  "New York Islanders":    { name: "UBS Arena",                  city: "Elmont, NY",           outdoor: false },
+  "New York Rangers":      { name: "Madison Square Garden",      city: "New York, NY",         outdoor: false },
+  "Ottawa Senators":       { name: "Canadian Tire Centre",       city: "Kanata, ON",           outdoor: false },
+  "Philadelphia Flyers":   { name: "Wells Fargo Center",         city: "Philadelphia, PA",     outdoor: false },
+  "Pittsburgh Penguins":   { name: "PPG Paints Arena",           city: "Pittsburgh, PA",       outdoor: false },
+  "San Jose Sharks":       { name: "SAP Center",                 city: "San Jose, CA",         outdoor: false },
+  "Seattle Kraken":        { name: "Climate Pledge Arena",       city: "Seattle, WA",          outdoor: false },
+  "St. Louis Blues":       { name: "Enterprise Center",          city: "St. Louis, MO",        outdoor: false },
+  "Tampa Bay Lightning":   { name: "Amalie Arena",               city: "Tampa, FL",            outdoor: false },
+  "Toronto Maple Leafs":   { name: "Scotiabank Arena",           city: "Toronto, ON",          outdoor: false },
+  "Utah Mammoth":          { name: "Delta Center",               city: "Salt Lake City, UT",   outdoor: false },
+  "Vancouver Canucks":     { name: "Rogers Arena",               city: "Vancouver, BC",        outdoor: false },
+  "Vegas Golden Knights":  { name: "T-Mobile Arena",             city: "Las Vegas, NV",        outdoor: false },
+  "Washington Capitals":   { name: "Capital One Arena",          city: "Washington, DC",       outdoor: false },
+  "Winnipeg Jets":         { name: "Canada Life Centre",         city: "Winnipeg, MB",         outdoor: false },
 };
+
+// Fuzzy venue lookup — uses ESPN_TEAM_IDS to resolve user input to a canonical name.
+function findVenue(teamName, sport) {
+  if (!teamName) return null;
+  const map = ESPN_TEAM_IDS[sport] || {};
+  const lc = teamName.toLowerCase();
+  // Walk through the canonical names for this sport and match on nickname or full name
+  for (const [fullName] of Object.entries(map)) {
+    const nameLc = fullName.toLowerCase();
+    const nickname = nameLc.split(" ").slice(-1)[0]; // e.g. "magic", "pistons"
+    if (nameLc === lc || lc.includes(nickname) || nameLc.includes(lc) || lc.includes(nameLc)) {
+      if (VENUES[fullName]) return VENUES[fullName];
+    }
+  }
+  // Direct key fallback (catches teams typed exactly)
+  return VENUES[teamName] || null;
+}
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 let redis = null;
@@ -250,7 +380,7 @@ async function fetchOdds(teamA, teamB, sport) {
       spread,
       total,
       lineMovement,
-      bestValue: { team: teamA, odds: moneyline.find((r) => r.best)?.[ teamA] || "+100", book: bestABook || "FanDuel" },
+      bestValue: { team: teamA, odds: moneyline.find((r) => r.book === bestABook)?.[teamA] || "+100", book: bestABook || "FanDuel" },
     };
   } catch {
     return null;
@@ -313,20 +443,6 @@ function fetchWithTimeout(url, ms = 5000) {
   return fetch(url, { signal: controller.signal }).finally(() => clearTimeout(id));
 }
 
-async function espnFindTeam(teamName, espn) {
-  const base = `https://site.api.espn.com/apis/site/v2/sports/${espn.sport}/${espn.league}`;
-  const res = await fetchWithTimeout(`${base}/teams?limit=100`);
-  const data = await res.json();
-  const teams = data.sports?.[0]?.leagues?.[0]?.teams || [];
-  const lc = teamName.toLowerCase();
-  return teams.find((t) => {
-    const d = (t.team?.displayName || "").toLowerCase();
-    const n = (t.team?.nickname || "").toLowerCase();
-    const s = (t.team?.shortDisplayName || "").toLowerCase();
-    const a = (t.team?.abbreviation || "").toLowerCase();
-    return d.includes(lc) || lc.includes(n) || lc.includes(s) || lc.includes(a) || n.includes(lc);
-  })?.team || null;
-}
 
 // ── Franchise star map — used as primary identifier, ESPN provides stat lines ─
 const FRANCHISE_STARS = {
@@ -501,10 +617,17 @@ async function fetchRealStarData(teamA, teamB, sport) {
 
   async function getTeamStar(teamName) {
     try {
-      const team = await espnFindTeam(teamName, espn);
-      if (!team) return null;
-      const teamId = team.id;
-      const logo = team.logos?.[0]?.href || null;
+      // Use static ID map (guaranteed correct) so box score lookup p.team?.id matches
+      const teamId = findESPNTeamId(teamName, sport);
+      if (!teamId) return null;
+
+      // Fetch logo from the single-team endpoint (non-blocking; falls back to null)
+      let logo = null;
+      try {
+        const tRes = await fetchWithTimeout(`${base}/teams/${teamId}`);
+        const tData = await tRes.json();
+        logo = tData.team?.logos?.[0]?.href || null;
+      } catch { /* no logo */ }
 
       // Fetch from the correct season phase (playoff vs regular) with fallback.
       // Priority: e.g. during NBA playoffs → [3, 2] tries postseason first,
@@ -608,14 +731,11 @@ async function fetchRealH2H(teamA, teamB, sport) {
   const base = `https://site.api.espn.com/apis/site/v2/sports/${espn.sport}/${espn.league}`;
 
   try {
-    const [teamAData, teamBData] = await Promise.allSettled([
-      espnFindTeam(teamA, espn),
-      espnFindTeam(teamB, espn),
-    ]);
-
-    const tA = teamAData.status === "fulfilled" ? teamAData.value : null;
-    const tB = teamBData.status === "fulfilled" ? teamBData.value : null;
-    if (!tA || !tB) return null;
+    // Use the static ESPN_TEAM_IDS map (guaranteed correct) instead of the
+    // dynamic espnFindTeam search, which can match the wrong team.
+    const teamAId = findESPNTeamId(teamA, sport);
+    const teamBId = findESPNTeamId(teamB, sport);
+    if (!teamAId || !teamBId) return null;
 
     // Get teamA's schedule across relevant season phases, find games vs teamB
     const seasonYear = getESPNSeasonYear(sport);
@@ -626,7 +746,7 @@ async function fetchRealH2H(teamA, teamB, sport) {
     for (const seasonType of seasonTypes) {
       try {
         const r = await fetchWithTimeout(
-          `${base}/teams/${tA.id}/schedule?season=${seasonYear}&seasontype=${seasonType}`
+          `${base}/teams/${teamAId}/schedule?season=${seasonYear}&seasontype=${seasonType}`
         );
         const d = await r.json();
         for (const e of (d.events || [])) {
@@ -638,9 +758,13 @@ async function fetchRealH2H(teamA, teamB, sport) {
     const h2hGames = allEvents
       .filter((e) => {
         const opponents = e.competitions?.[0]?.competitors || [];
+        // Validate: game MUST include both teams — drop any contaminated rows
+        const hasTeamA = opponents.some((c) => String(c.team?.id) === String(teamAId));
+        const hasTeamB = opponents.some((c) => String(c.team?.id) === String(teamBId));
         return (
           e.competitions?.[0]?.status?.type?.completed === true &&
-          opponents.some((c) => c.team?.id === String(tB.id))
+          hasTeamA &&
+          hasTeamB
         );
       })
       .sort((a, b) => new Date(b.date) - new Date(a.date))
@@ -657,6 +781,7 @@ async function fetchRealH2H(teamA, teamB, sport) {
       const awayTeam = away?.team?.displayName || "";
       const homeScore = parseInt(home?.score?.displayValue ?? home?.score ?? 0);
       const awayScore = parseInt(away?.score?.displayValue ?? away?.score ?? 0);
+      const winnerId = homeScore > awayScore ? String(home?.team?.id) : String(away?.team?.id);
       const winner = homeScore > awayScore ? homeTeam : awayTeam;
       const date = e.date
         ? new Date(e.date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
@@ -665,10 +790,12 @@ async function fetchRealH2H(teamA, teamB, sport) {
         date,
         result: `${winner} won`,
         score: `${awayTeam} ${awayScore} – ${homeScore} ${homeTeam}`,
+        winnerId,
       };
     });
 
-    const aWins = season_results.filter((r) => r.result.toLowerCase().includes(teamA.toLowerCase())).length;
+    // Compute wins by team ID — not by fuzzy name matching — so trend is always accurate
+    const aWins = season_results.filter((r) => r.winnerId === String(teamAId)).length;
     const bWins = season_results.length - aWins;
     const last = season_results[0];
 
@@ -837,7 +964,7 @@ export default async function handler(req, res) {
     } catch { /* cache miss */ }
   }
 
-  const venue = VENUES[teamB] || { name: `${teamB} Arena`, city: "TBD", outdoor: false };
+  const venue = findVenue(teamB, sport) || { name: null, city: null, outdoor: false };
 
   // Fire ALL fetches in parallel — injuries, odds, weather, stars, H2H all at once
   const [
