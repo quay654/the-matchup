@@ -84,20 +84,22 @@ export default function GamePicker({ sport, setSport, teamA, setTeamA, teamB, se
                 <button
                   key={g.id}
                   onClick={() => handlePickGame(g)}
-                  className={`group w-full text-left p-5 hover:bg-emerald-50/50 transition-colors flex items-center justify-between ${
+                  className={`group w-full text-left px-4 py-4 sm:p-5 hover:bg-emerald-50/50 transition-colors flex items-center gap-3 ${
                     i !== upcoming.length - 1 ? "border-b border-black/[0.08]" : ""
                   }`}
                 >
                   <div className="min-w-0 flex-1">
-                    <div className="font-display text-lg leading-tight text-black truncate">
-                      {g.away} <span className="text-black/40">vs</span> {g.home}
+                    <div className="flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5">
+                      <span className="font-display text-base sm:text-lg leading-snug text-black">{g.away}</span>
+                      <span className="font-display text-sm text-black/40 shrink-0">vs</span>
+                      <span className="font-display text-base sm:text-lg leading-snug text-black">{g.home}</span>
                     </div>
                     <div className="text-sm text-black/60 mt-1">
                       {g.date && <span className="font-medium text-black/70">{g.date} · </span>}
                       {g.time}
                     </div>
                   </div>
-                  <ChevronRight size={18} className="text-black/30 group-hover:text-emerald-500 transition-colors" />
+                  <ChevronRight size={18} className="text-black/30 group-hover:text-emerald-500 transition-colors shrink-0" />
                 </button>
               ))
             )}
