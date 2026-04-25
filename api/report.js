@@ -556,8 +556,10 @@ async function fetchRealStarData(teamA, teamB, sport) {
         const opp = isHome
           ? (awayComp?.team?.abbreviation || awayComp?.team?.shortDisplayName || "OPP")
           : (homeComp?.team?.abbreviation || homeComp?.team?.shortDisplayName || "OPP");
-        const teamScore = parseInt(isHome ? homeComp?.score : awayComp?.score) || 0;
-        const oppScore = parseInt(isHome ? awayComp?.score : homeComp?.score) || 0;
+        const rawTeamScore = isHome ? homeComp?.score : awayComp?.score;
+        const rawOppScore = isHome ? awayComp?.score : homeComp?.score;
+        const teamScore = parseInt(rawTeamScore?.displayValue ?? rawTeamScore ?? 0) || 0;
+        const oppScore = parseInt(rawOppScore?.displayValue ?? rawOppScore ?? 0) || 0;
         const result = teamScore > oppScore ? "W" : "L";
         const date = event.date
           ? new Date(event.date).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "America/New_York" })
@@ -653,8 +655,8 @@ async function fetchRealH2H(teamA, teamB, sport) {
       const away = comp?.competitors?.find((c) => c.homeAway === "away");
       const homeTeam = home?.team?.displayName || "";
       const awayTeam = away?.team?.displayName || "";
-      const homeScore = parseInt(home?.score || 0);
-      const awayScore = parseInt(away?.score || 0);
+      const homeScore = parseInt(home?.score?.displayValue ?? home?.score ?? 0);
+      const awayScore = parseInt(away?.score?.displayValue ?? away?.score ?? 0);
       const winner = homeScore > awayScore ? homeTeam : awayTeam;
       const date = e.date
         ? new Date(e.date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
