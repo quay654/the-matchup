@@ -244,36 +244,87 @@ function findESPNTeamId(teamName, sport) {
 
 // ── ESPN injuries (Bug #2 fix — replaces broken API-Sports call) ──────────
 async function fetchInjuries(teamA, teamB, sport) {
-  const espn = ESPN_SPORT_MAP[sport];
-  if (!espn) return { [teamA]: [], [teamB]: [] };
-
-  const STATUS_MAP = {
-    "Out": "Out", "Doubtful": "Doubtful", "Questionable": "Questionable",
-    "Probable": "Probable", "Day-To-Day": "Questionable", "IR": "Out",
-    "PUP": "Out", "Suspended": "Out",
+  // The per-team endpoint (/teams/{id}/injuries) returns {} for all teams.
+  // The working endpoint is the league-level /injuries URL.
+  // NFL uses "football" not "americanfootball" for this specific path.
+  const INJURY_SPORT_PATH = {
+    nba: "basketball/nba",
+    nfl: "football/nfl",
+    mlb: "baseball/mlb",
+    nhl: "hockey/nhl",
   };
+  const sportPath = INJURY_SPORT_PATH[sport];
+  if (!sportPath) return { [teamA]: [], [teamB]: [] };
 
-  async function getInjuries(teamName) {
+  // Status values observed in ESPN data → UI badge values.
+  // "Active" and health-only statuses are skipped (player is available).
+  const STATUS_MAP = {
+    "out": "Out", "doubtful": "Doubtful", "questionable": "Questionable",
+    "day-to-day": "Questionable", "dtd": "Questionable",
+    "ir": "Out", "injured reserve": "Out",
+    "10-day-il": "Out", "15-day-il": "Out", "60-day-il": "Out",
+    "suspension": "Out", "suspended": "Out", "pup": "Out",
+  };
+  const SKIP_STATUSES = new Set(["active", "probable", "paternity", "bereavement"]);
+
+  // Fetch the full league injury list once; cache for 10 minutes.
+  const r = getRedis();
+  const today = new Date().toISOString().split("T")[0];
+  const cacheKey = `injv2:${sport}:${today}`;
+  let allTeams = null;
+
+  if (r) {
     try {
-      const teamId = findESPNTeamId(teamName, sport);
-      if (!teamId) return [];
-      const url = `https://site.api.espn.com/apis/site/v2/sports/${espn.sport}/${espn.league}/teams/${teamId}/injuries`;
+      const cached = await r.get(cacheKey);
+      if (cached) allTeams = cached;
+    } catch { /* miss */ }
+  }
+
+  if (!allTeams) {
+    try {
+      const url = `https://site.api.espn.com/apis/site/v2/sports/${sportPath}/injuries`;
       const res = await fetchWithTimeout(url);
       const data = await res.json();
-      return (data.items || []).slice(0, 6).map((item) => ({
-        player: item.athlete?.displayName || "Unknown",
-        status: STATUS_MAP[item.status] || item.status || "Questionable",
-        note: [item.details?.type, item.details?.side].filter(Boolean).join(" ") || item.type || "",
-      }));
+      allTeams = data.injuries || [];
+      if (r && allTeams.length) {
+        try { await r.setex(cacheKey, 600, allTeams); } catch { /* ignore */ }
+      }
     } catch {
-      return [];
+      return { [teamA]: [], [teamB]: [] };
     }
   }
 
-  const [resA, resB] = await Promise.allSettled([getInjuries(teamA), getInjuries(teamB)]);
+  function parseTeam(teamName) {
+    const lc = teamName.toLowerCase();
+    const entry = (allTeams || []).find((t) => {
+      const dn = (t.displayName || "").toLowerCase();
+      const nick = dn.split(" ").slice(-1)[0];
+      return dn === lc || dn.includes(lc) || lc.includes(nick) || lc.includes(dn);
+    });
+    if (!entry) return [];
+
+    return (entry.injuries || [])
+      .map((item) => {
+        const rawStatus = (item.status || "").toLowerCase();
+        if (SKIP_STATUSES.has(rawStatus)) return null;
+        const mappedStatus = STATUS_MAP[rawStatus] || item.status || "Questionable";
+        const det = item.details || {};
+        const side = det.side && det.side !== "Not Specified" && det.side !== "?" ? `${det.side} ` : "";
+        const part = det.type && det.type !== "Not Injury Related" ? det.type : "";
+        const injury = `${side}${part}`.trim() || "";
+        return {
+          player: item.athlete?.displayName || "Unknown",
+          status: mappedStatus,
+          injury,
+        };
+      })
+      .filter(Boolean)
+      .slice(0, 6);
+  }
+
   return {
-    [teamA]: resA.status === "fulfilled" ? resA.value : [],
-    [teamB]: resB.status === "fulfilled" ? resB.value : [],
+    [teamA]: parseTeam(teamA),
+    [teamB]: parseTeam(teamB),
   };
 }
 
@@ -829,13 +880,20 @@ async function generateAISummary(teamA, teamB, sport, dataContext) {
 
   const systemPrompt = `You are a professional sports handicapper and analyst with 20+ years of experience. You provide sharp, data-driven analysis for pre-game matchup reports. Your tone is confident, concise, and knowledgeable — like a seasoned expert, not a chatbot. You always cite specific data points from what you're given.`;
 
-  const userPrompt = `Generate a matchup analysis for ${teamA} (away) vs ${teamB} (home) in the ${sport.toUpperCase()}.
+  const phase = dataContext.seasonPhase || "regular season";
+  const phaseNote = phase === "playoffs"
+    ? `This is a PLAYOFF game. Weight recent playoff performance heavily. Mention the series context (who leads, how many games played) in your analysis.`
+    : `This is a regular season game.`;
+
+  const userPrompt = `Generate a matchup analysis for ${teamA} (away) vs ${teamB} (home) in the ${sport.toUpperCase()} ${phase}.
+
+${phaseNote}
 
 Here is the data:
 ${JSON.stringify(dataContext, null, 2)}
 
 Provide:
-1. A 3-paragraph analyst take (plain prose, no headers). Cover recent form, key matchup factors, and line movement / market angle.
+1. A 3-paragraph analyst take (plain prose, no headers). Cover recent form, key matchup factors, and line movement / market angle. If this is a playoff game, explicitly reference the series context and momentum.
 2. A JSON block (wrapped in \`\`\`json ... \`\`\`) with this exact shape:
 {
   "confidence": 3,
@@ -1013,8 +1071,11 @@ export default async function handler(req, res) {
       trend: `${teamA} vs ${teamB} — season series`,
     };
 
+  // Determine season phase so Claude explicitly knows it's the playoffs
+  const seasonPhase = getSeasonTypePriority(sport)[0] === 3 ? "playoffs" : "regular season";
+
   // Build context for Claude
-  const dataContext = { injuries: injuriesWithImpact, odds, weather, stars, headToHead, sport, venue: { name: venue.name, city: venue.city } };
+  const dataContext = { injuries: injuriesWithImpact, odds, weather, stars, headToHead, sport, seasonPhase, venue: { name: venue?.name, city: venue?.city } };
   const aiResult = await generateAISummary(teamA, teamB, sport, dataContext);
 
   const aiSummary = aiResult?.aiSummary || `${teamA} arrives with momentum. The line movement and market signals favor the visitor side.\n\n${teamB} hold home court advantage but recent defensive numbers have been leaky.\n\nSharp action is split — this one could go either way.`;
